@@ -14,12 +14,11 @@ public class Main {
 		String groupId = "testing";
 		
 		//loading OpenCV libraries
-		//System.loadLibrary(Core.NATIVE_LIBRARY_NAME);
+		System.loadLibrary(Core.NATIVE_LIBRARY_NAME);
 		
 		//initiating actor system and top level supervisor
 		ActorSystem system = ActorSystem.create("iot-camera-system");
 		ActorRef camera = system.actorOf(IotCameraSupervisor.props(deviceId, groupId), "iot-camera-supervisor");
-		//ActorRef camera = system.actorOf(Props.create(IotCameraSupervisor.class, groupId, deviceId), "iot-camera-supervisor");
 		
 		
 

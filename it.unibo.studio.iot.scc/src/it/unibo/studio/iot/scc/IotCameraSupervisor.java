@@ -28,7 +28,9 @@ public class IotCameraSupervisor extends AbstractActor {
 	}
 	
 	public void preStart(){
+		
 		this.uiSupervisor = this.getContext().actorOf(IotCameraUISupervisor.props(), "ui-supervisor");
+		this.videoAnalysisSupervisor = this.getContext().actorOf(IotCameraVASupervisor.props(0), "video-analysis-supervisor");
 	}
 
 	public static Props props(String groupId, String deviceId) {
