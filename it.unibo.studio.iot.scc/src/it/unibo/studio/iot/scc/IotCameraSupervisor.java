@@ -19,6 +19,7 @@ public class IotCameraSupervisor extends AbstractActor {
 	private ActorRef uiSupervisor;
 	private ActorRef videoAnalysisSupervisor;
 	private ActorRef counterSupervisor;
+	private ActorRef remoteCommsSupervisor;
 
 	private final LoggingAdapter log = Logging.getLogger(getContext().getSystem(), this);
 	
