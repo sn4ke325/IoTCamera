@@ -3,6 +3,7 @@
 	<classpathentry kind="src" path="src"/>
 	<classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER"/>
 	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/OpenCV-3.2.0"/>
+	<classpathentry kind="con" path="org.eclipse.fx.ide.jdt.core.JAVAFX_CONTAINER"/>
 	<classpathentry kind="lib" path="lib/akka-actor_2.12-2.5.3.jar"/>
 	<classpathentry kind="lib" path="lib/config-1.3.1.jar"/>
 	<classpathentry kind="lib" path="lib/reactive-streams-1.0.0.jar"/>

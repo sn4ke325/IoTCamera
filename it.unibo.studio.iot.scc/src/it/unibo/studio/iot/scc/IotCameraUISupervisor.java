@@ -5,13 +5,22 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 
 import akka.actor.AbstractActor;
+import akka.actor.ActorRef;
+import akka.actor.ActorSelection;
 import akka.actor.Props;
 import akka.event.Logging;
 import akka.event.LoggingAdapter;
+import akka.pattern.Patterns;
+import akka.util.Timeout;
+import it.unibo.studio.iot.scc.messages.Message;
+import it.unibo.studio.iot.scc.messages.StartGUI;
 import it.unibo.studio.iot.scc.messages.StartVideoCapture;
 import it.unibo.studio.iot.scc.messages.StopVideoCapture;
 import it.unibo.studio.iot.scc.messages.VideoCaptureStarted;
 import it.unibo.studio.iot.scc.messages.VideoCaptureStopped;
+import scala.concurrent.Await;
+import scala.concurrent.Future;
+import scala.concurrent.duration.Duration;
 
 public class IotCameraUISupervisor extends AbstractActor {
 
@@ -50,6 +59,11 @@ public class IotCameraUISupervisor extends AbstractActor {
 				output = "Sent message to Stop Video Capture";
 			}
 				break;
+			case "gui": {
+				this.context().parent().tell(new StartGUI(), this.self());
+				output = "User Interface Launched";
+			}
+				break;
 			default:
 				output = "No command recognized.";
 				break;
@@ -63,7 +77,9 @@ public class IotCameraUISupervisor extends AbstractActor {
 	@Override
 	public Receive createReceive() {
 
-		return receiveBuilder().match(VideoCaptureStarted.class, r -> {
+		return receiveBuilder().match(Message.class, r -> {
+			System.out.println(r.getContent());
+		}).match(VideoCaptureStarted.class, r -> {
 			log.info("Received: video anaylisis has started.");
 		}).match(VideoCaptureStopped.class, r -> {
 			log.info("Received: video analysis has stopped/");

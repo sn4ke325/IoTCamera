@@ -27,8 +27,6 @@ public class IotCameraVASupervisor extends AbstractActor {
 	private ScheduledExecutorService timer;
 
 	public IotCameraVASupervisor(int cameraId) {
-		this.cameraActive = false;
-		this.capture = new VideoCapture();
 		this.cameraId = cameraId;
 	}
 
@@ -37,7 +35,8 @@ public class IotCameraVASupervisor extends AbstractActor {
 	}
 
 	public void preStart() {
-		//startVideoCapture();
+		this.cameraActive = false;
+		this.capture = new VideoCapture();
 	}
 
 	private void startVideoCapture() {
@@ -49,7 +48,7 @@ public class IotCameraVASupervisor extends AbstractActor {
 
 				public void run() {
 					Mat frame = grabFrame();
-					//System.out.println("grabframe");
+					// System.out.println("grabframe");
 
 				}
 			};
@@ -96,17 +95,16 @@ public class IotCameraVASupervisor extends AbstractActor {
 
 	@Override
 	public Receive createReceive() {
-		return receiveBuilder()
-				.match(StartVideoCapture.class, r->{
-					log.info("Starting Video Capture and Analysis");
-					this.startVideoCapture();
-					getSender().tell(new VideoCaptureStarted(), this.getSelf());})
-				.match(StopVideoCapture.class, r->{
-					log.info("Stopping Video Capture and Analysis");
-					this.stopVideoCapture();
-					getSender().tell(new VideoCaptureStopped(), this.getSelf());
-				}).build();
-				
+		return receiveBuilder().match(StartVideoCapture.class, r -> {
+			log.info("Starting Video Capture and Analysis");
+			this.startVideoCapture();
+			getSender().tell(new VideoCaptureStarted(), this.getSelf());
+		}).match(StopVideoCapture.class, r -> {
+			log.info("Stopping Video Capture and Analysis");
+			this.stopVideoCapture();
+			getSender().tell(new VideoCaptureStopped(), this.getSelf());
+		}).build();
+
 	}
 
 }
