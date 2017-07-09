@@ -1,8 +1,16 @@
 package it.unibo.studio.iot.scc;
 
+import java.awt.FlowLayout;
+import java.awt.image.BufferedImage;
 import java.io.BufferedReader;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
+
+import javax.imageio.ImageIO;
+import javax.swing.ImageIcon;
+import javax.swing.JFrame;
+import javax.swing.JLabel;
 
 import akka.actor.AbstractActor;
 import akka.actor.ActorRef;
@@ -18,6 +26,7 @@ import it.unibo.studio.iot.scc.messages.StartVideoCapture;
 import it.unibo.studio.iot.scc.messages.StopVideoCapture;
 import it.unibo.studio.iot.scc.messages.VideoCaptureStarted;
 import it.unibo.studio.iot.scc.messages.VideoCaptureStopped;
+import javafx.scene.canvas.Canvas;
 import scala.concurrent.Await;
 import scala.concurrent.Future;
 import scala.concurrent.duration.Duration;
@@ -25,8 +34,30 @@ import scala.concurrent.duration.Duration;
 public class IotCameraUISupervisor extends AbstractActor {
 
 	private final LoggingAdapter log = Logging.getLogger(getContext().getSystem(), this);
+	private Canvas canvas;
 
 	public void preStart() {
+	/*//testing IO	
+	 BufferedImage img;
+	try {
+		img = ImageIO.read(new File("./res/001.png"));
+		ImageIcon icon = new ImageIcon(img);
+		JFrame frame = new JFrame();
+		frame.setLayout(new FlowLayout());
+		frame.setSize(200, 300);
+		JLabel lbl = new JLabel();
+		lbl.setIcon(icon);
+		frame.add(lbl);
+		frame.setVisible(true);
+		frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+		
+	} catch (IOException e1) {
+		// TODO Auto-generated catch block
+		e1.printStackTrace();
+	}
+	*/
+	 
+	 
 		try {
 			this.startConsole();
 		} catch (IOException e) {

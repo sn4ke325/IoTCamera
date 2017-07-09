@@ -17,7 +17,7 @@ public class Main {
 		System.loadLibrary(Core.NATIVE_LIBRARY_NAME);
 		
 		//initiating actor system and top level supervisor
-		ActorSystem system = ActorSystem.create("iot-camera-system");
+		ActorSystem system = ActorSystem.create("iot-camera-system");		
 		ActorRef camera = system.actorOf(IotCameraSupervisor.props(deviceId, groupId), "iot-camera-supervisor");
 		
 		
