@@ -15,12 +15,23 @@ import javax.swing.JLabel;
 import org.opencv.core.Mat;
 import org.opencv.videoio.VideoCapture;
 
+import akka.NotUsed;
 import akka.actor.AbstractActor;
+import akka.actor.ActorRef;
 import akka.actor.ActorSystem;
 import akka.actor.Props;
 import akka.dispatch.ExecutionContexts;
 import akka.event.Logging;
 import akka.event.LoggingAdapter;
+import akka.stream.Attributes;
+import akka.stream.Outlet;
+import akka.stream.OverflowStrategy;
+import akka.stream.SourceShape;
+import akka.stream.impl.ActorPublisher;
+import akka.stream.javadsl.Source;
+import akka.stream.javadsl.SourceQueueWithComplete;
+import akka.stream.stage.GraphStage;
+import akka.stream.stage.GraphStageLogic;
 import scala.concurrent.duration.FiniteDuration;
 
 import it.unibo.studio.iot.scc.messages.*;
@@ -33,6 +44,9 @@ public class IotCameraVASupervisor extends AbstractActor {
 	private VideoCapture capture;
 	private int cameraId;
 	private ScheduledExecutorService timer;
+	
+	//streamlining
+	private Source<Mat, NotUsed> frameSource;
 
 	// for debug purposes
 
@@ -50,11 +64,14 @@ public class IotCameraVASupervisor extends AbstractActor {
 	public void preStart() {
 		this.cameraActive = false;
 		this.capture = new VideoCapture();
+		//streamlining
+		//this.frameSource = Source.queue(60, OverflowStrategy.backpressure());
+		//this.frameSource.addAttributes(attr)
 		// for debug purposes we create a window to watch the video
 		this.window = new JFrame();
 		this.window.setLayout(new FlowLayout());
 		this.window.setSize(1280, 720);
-		this.lbl = new JLabel("camera feed");
+		this.lbl = new JLabel();
 		this.window.add(lbl);
 		this.window.setVisible(true);
 		this.window.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
@@ -153,3 +170,44 @@ public class IotCameraVASupervisor extends AbstractActor {
 	}
 
 }
+
+//workers
+
+class frameEmitter extends GraphStage<SourceShape<Mat>>{
+	
+	public final Outlet<Mat> out = Outlet.create("FramesSource.out");
+	private final 
+	public frameEmitter(ActorRef impl) {
+		super();
+		// TODO Auto-generated constructor stub
+	}
+
+	@Override
+	public Receive createReceive() {
+		
+		return receiveBuilder().match(Request.class, r->{//calls emitFrames();
+			}).match(Continue.class, r->{//calls emitFrames();
+				
+			}).match(Stop.class, r->{//stops the actor
+				
+			}).build();
+		}
+
+	@Override
+	public SourceShape<Mat> shape() {
+		// TODO Auto-generated method stub
+		return null;
+	}
+
+	@Override
+	public GraphStageLogic createLogic(Attributes inheritedAttributes) throws Exception {
+		// TODO Auto-generated method stub
+		return null;
+	}
+	}
+	
+//workers messages
+
+final class Request{}
+final class Continue{}
+final class Stop{}
