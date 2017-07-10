@@ -40,15 +40,12 @@ public class IotCameraSupervisor extends AbstractActor {
 		return Props.create(IotCameraSupervisor.class, groupId, deviceId);
 	}
 
-	private void startGUI() {
-		this.GUI = this.context().actorOf(FXGUIActor.props(this.videoAnalysisSupervisor), "gui-actor");
-	}
 
 	@Override
 	public Receive createReceive() {
 		// TODO Auto-generated method stub
 		return receiveBuilder().match(StartGUI.class, r -> {
-			this.startGUI();
+			//this.startGUI();
 			getSender().tell(new Message<String>("GUI started"), this.self());
 		}).build();
 	}

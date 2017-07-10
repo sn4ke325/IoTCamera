@@ -1,8 +1,16 @@
 package it.unibo.studio.iot.scc;
 
+import java.awt.FlowLayout;
+import java.awt.image.BufferedImage;
+import java.awt.image.DataBufferByte;
+import java.awt.image.WritableRaster;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+
+import javax.swing.ImageIcon;
+import javax.swing.JFrame;
+import javax.swing.JLabel;
 
 import org.opencv.core.Mat;
 import org.opencv.videoio.VideoCapture;
@@ -26,6 +34,11 @@ public class IotCameraVASupervisor extends AbstractActor {
 	private int cameraId;
 	private ScheduledExecutorService timer;
 
+	// for debug purposes
+
+	private JFrame window;
+	private JLabel lbl;
+
 	public IotCameraVASupervisor(int cameraId) {
 		this.cameraId = cameraId;
 	}
@@ -37,6 +50,14 @@ public class IotCameraVASupervisor extends AbstractActor {
 	public void preStart() {
 		this.cameraActive = false;
 		this.capture = new VideoCapture();
+		// for debug purposes we create a window to watch the video
+		this.window = new JFrame();
+		this.window.setLayout(new FlowLayout());
+		this.window.setSize(1280, 720);
+		this.lbl = new JLabel("camera feed");
+		this.window.add(lbl);
+		this.window.setVisible(true);
+		this.window.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
 	}
 
 	private void startVideoCapture() {
@@ -49,8 +70,9 @@ public class IotCameraVASupervisor extends AbstractActor {
 				public void run() {
 					Mat frame = grabFrame();
 					// System.out.println("grabframe");
-
+					showFrame(frame);
 				}
+
 			};
 
 			this.timer = Executors.newSingleThreadScheduledExecutor();
@@ -59,6 +81,29 @@ public class IotCameraVASupervisor extends AbstractActor {
 		} else {
 			System.err.println("Can't open camera connection.");
 		}
+	}
+
+	private void showFrame(Mat frame){
+		
+		lbl.setIcon(new ImageIcon(MatToBufferedImage(frame)));
+		window.repaint();
+		
+	}
+
+	private BufferedImage MatToBufferedImage(Mat frame) {
+
+		int type = 0;
+		if (frame.channels() == 1)
+			type = BufferedImage.TYPE_BYTE_GRAY;
+		else if (frame.channels() == 3)
+			type = BufferedImage.TYPE_3BYTE_BGR;
+		BufferedImage image = new BufferedImage(frame.width(), frame.height(), type);
+		WritableRaster raster = image.getRaster();
+		DataBufferByte dataBuffer = (DataBufferByte) raster.getDataBuffer();
+		byte[] data = dataBuffer.getData();
+		frame.get(0, 0, data);
+		return image;
+
 	}
 
 	private void stopVideoCapture() {
