@@ -23,13 +23,18 @@ import akka.actor.Props;
 import akka.dispatch.ExecutionContexts;
 import akka.event.Logging;
 import akka.event.LoggingAdapter;
+import akka.stream.ActorMaterializer;
 import akka.stream.Attributes;
+import akka.stream.Materializer;
 import akka.stream.Outlet;
 import akka.stream.OverflowStrategy;
 import akka.stream.SourceShape;
+import akka.stream.ThrottleMode;
 import akka.stream.impl.ActorPublisher;
+import akka.stream.javadsl.Sink;
 import akka.stream.javadsl.Source;
 import akka.stream.javadsl.SourceQueueWithComplete;
+import akka.stream.stage.AbstractOutHandler;
 import akka.stream.stage.GraphStage;
 import akka.stream.stage.GraphStageLogic;
 import scala.concurrent.duration.FiniteDuration;
@@ -44,9 +49,12 @@ public class IotCameraVASupervisor extends AbstractActor {
 	private VideoCapture capture;
 	private int cameraId;
 	private ScheduledExecutorService timer;
-	
-	//streamlining
+	private Mat frame;
+
+	// streamlining
+	private final Materializer materializer = ActorMaterializer.create(this.getContext());
 	private Source<Mat, NotUsed> frameSource;
+	//private Sink<Mat,CompletionStage<Mat>> frameSink;
 
 	// for debug purposes
 
@@ -64,9 +72,13 @@ public class IotCameraVASupervisor extends AbstractActor {
 	public void preStart() {
 		this.cameraActive = false;
 		this.capture = new VideoCapture();
-		//streamlining
-		//this.frameSource = Source.queue(60, OverflowStrategy.backpressure());
-		//this.frameSource.addAttributes(attr)
+
+		// streamlining
+		// creating an Akka stream Source that pushes frames according to back
+		// pressure
+		this.frameSource = Source.fromGraph(new CameraFrameSource(capture));
+		// creating an Akka stream Sink to obtain a frame
+this.frameSink =		
 		// for debug purposes we create a window to watch the video
 		this.window = new JFrame();
 		this.window.setLayout(new FlowLayout());
@@ -82,7 +94,9 @@ public class IotCameraVASupervisor extends AbstractActor {
 		if (capture.isOpened()) {
 			this.cameraActive = true;
 
-			Runnable framegrabber = new Runnable() {
+			this.frameSource.throttle(33, FiniteDuration.create(1, TimeUnit.SECONDS), 1, ThrottleMode.shaping())
+			
+			/*Runnable framegrabber = new Runnable() {
 
 				public void run() {
 					Mat frame = grabFrame();
@@ -93,18 +107,18 @@ public class IotCameraVASupervisor extends AbstractActor {
 			};
 
 			this.timer = Executors.newSingleThreadScheduledExecutor();
-			this.timer.scheduleAtFixedRate(framegrabber, 0, 33, TimeUnit.MILLISECONDS);
+			this.timer.scheduleAtFixedRate(framegrabber, 0, 33, TimeUnit.MILLISECONDS);*/
 
 		} else {
 			System.err.println("Can't open camera connection.");
 		}
 	}
 
-	private void showFrame(Mat frame){
-		
+	private void showFrame(Mat frame) {
+
 		lbl.setIcon(new ImageIcon(MatToBufferedImage(frame)));
 		window.repaint();
-		
+
 	}
 
 	private BufferedImage MatToBufferedImage(Mat frame) {
@@ -171,43 +185,46 @@ public class IotCameraVASupervisor extends AbstractActor {
 
 }
 
-//workers
+// creating a source that grabs frame from camera
 
-class frameEmitter extends GraphStage<SourceShape<Mat>>{
-	
-	public final Outlet<Mat> out = Outlet.create("FramesSource.out");
-	private final 
-	public frameEmitter(ActorRef impl) {
-		super();
-		// TODO Auto-generated constructor stub
+class CameraFrameSource extends GraphStage<SourceShape<Mat>> {
+
+	public final Outlet<Mat> out = Outlet.create("CameraFrameSource.out");
+	private final SourceShape<Mat> shape = SourceShape.of(out);
+	private VideoCapture capture;
+
+	public CameraFrameSource(VideoCapture cap) {
+		this.capture = cap;
 	}
 
 	@Override
-	public Receive createReceive() {
-		
-		return receiveBuilder().match(Request.class, r->{//calls emitFrames();
-			}).match(Continue.class, r->{//calls emitFrames();
-				
-			}).match(Stop.class, r->{//stops the actor
-				
-			}).build();
-		}
-
-	@Override
 	public SourceShape<Mat> shape() {
-		// TODO Auto-generated method stub
-		return null;
+		return shape;
 	}
 
 	@Override
 	public GraphStageLogic createLogic(Attributes inheritedAttributes) throws Exception {
-		// TODO Auto-generated method stub
-		return null;
-	}
-	}
-	
-//workers messages
+		return new GraphStageLogic(shape) {
+			{
+				setHandler(out, new AbstractOutHandler() {
 
-final class Request{}
-final class Continue{}
-final class Stop{}
+					@Override
+					public void onPull() throws Exception {
+						Mat frame = new Mat();
+						if (capture.isOpened()) {
+							try {
+								capture.read(frame);
+							} catch (Exception e) {
+								System.err.println("Exception during the image elaboration: " + e);
+							}
+						}
+						push(out, frame);
+
+					}
+
+				});
+			}
+		};
+	}
+
+}
