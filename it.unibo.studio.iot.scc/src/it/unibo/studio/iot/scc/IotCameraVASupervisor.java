@@ -4,6 +4,7 @@ import java.awt.FlowLayout;
 import java.awt.image.BufferedImage;
 import java.awt.image.DataBufferByte;
 import java.awt.image.WritableRaster;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -15,6 +16,7 @@ import javax.swing.JLabel;
 import org.opencv.core.Mat;
 import org.opencv.videoio.VideoCapture;
 
+import akka.Done;
 import akka.NotUsed;
 import akka.actor.AbstractActor;
 import akka.actor.ActorRef;
@@ -25,12 +27,16 @@ import akka.event.Logging;
 import akka.event.LoggingAdapter;
 import akka.stream.ActorMaterializer;
 import akka.stream.Attributes;
+import akka.stream.KillSwitches;
 import akka.stream.Materializer;
 import akka.stream.Outlet;
 import akka.stream.OverflowStrategy;
 import akka.stream.SourceShape;
 import akka.stream.ThrottleMode;
+import akka.stream.UniqueKillSwitch;
 import akka.stream.impl.ActorPublisher;
+import akka.stream.javadsl.Keep;
+import akka.stream.javadsl.RunnableGraph;
 import akka.stream.javadsl.Sink;
 import akka.stream.javadsl.Source;
 import akka.stream.javadsl.SourceQueueWithComplete;
@@ -54,8 +60,9 @@ public class IotCameraVASupervisor extends AbstractActor {
 	// streamlining
 	private final Materializer materializer = ActorMaterializer.create(this.getContext());
 	private Source<Mat, NotUsed> frameSource;
-	//private Sink<Mat,CompletionStage<Mat>> frameSink;
-
+	// private Sink<Mat,CompletionStage<Mat>> frameSink;
+	private RunnableGraph<UniqueKillSwitch> stream;
+	private UniqueKillSwitch killswitch;
 	// for debug purposes
 
 	private JFrame window;
@@ -77,8 +84,9 @@ public class IotCameraVASupervisor extends AbstractActor {
 		// creating an Akka stream Source that pushes frames according to back
 		// pressure
 		this.frameSource = Source.fromGraph(new CameraFrameSource(capture));
-		// creating an Akka stream Sink to obtain a frame
-this.frameSink =		
+		// creating an Akka stream to coninuosly capture frames @ 33fps
+		this.stream = frameSource.throttle(33, FiniteDuration.create(1, TimeUnit.SECONDS), 1, ThrottleMode.shaping())
+				.viaMat(KillSwitches.single(), Keep.right()).toMat(Sink.foreach(f -> showFrame(f)), Keep.left());
 		// for debug purposes we create a window to watch the video
 		this.window = new JFrame();
 		this.window.setLayout(new FlowLayout());
@@ -93,21 +101,7 @@ this.frameSink =
 		this.capture.open(cameraId);
 		if (capture.isOpened()) {
 			this.cameraActive = true;
-
-			this.frameSource.throttle(33, FiniteDuration.create(1, TimeUnit.SECONDS), 1, ThrottleMode.shaping())
-			
-			/*Runnable framegrabber = new Runnable() {
-
-				public void run() {
-					Mat frame = grabFrame();
-					// System.out.println("grabframe");
-					showFrame(frame);
-				}
-
-			};
-
-			this.timer = Executors.newSingleThreadScheduledExecutor();
-			this.timer.scheduleAtFixedRate(framegrabber, 0, 33, TimeUnit.MILLISECONDS);*/
+			killswitch = this.stream.run(materializer);
 
 		} else {
 			System.err.println("Can't open camera connection.");
@@ -138,21 +132,13 @@ this.frameSink =
 	}
 
 	private void stopVideoCapture() {
-		if (this.timer != null && !this.timer.isShutdown()) {
-			try {
-				// stop the timer
-				this.timer.shutdown();
-				this.timer.awaitTermination(33, TimeUnit.MILLISECONDS);
-			} catch (InterruptedException e) {
-				// log any exception
-				System.err.println("Exception in stopping the frame capture, trying to release the camera now... " + e);
-			}
-		}
 
 		if (this.capture.isOpened()) {
 			// release the camera
 			this.capture.release();
 		}
+		this.cameraActive = false;
+		this.killswitch.shutdown();
 	}
 
 	private Mat grabFrame() {
@@ -205,12 +191,13 @@ class CameraFrameSource extends GraphStage<SourceShape<Mat>> {
 	@Override
 	public GraphStageLogic createLogic(Attributes inheritedAttributes) throws Exception {
 		return new GraphStageLogic(shape) {
+			private Mat frame;
 			{
 				setHandler(out, new AbstractOutHandler() {
 
 					@Override
 					public void onPull() throws Exception {
-						Mat frame = new Mat();
+						frame = new Mat();
 						if (capture.isOpened()) {
 							try {
 								capture.read(frame);
