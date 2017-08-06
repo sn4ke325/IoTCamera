@@ -14,6 +14,8 @@ import javax.swing.JLabel;
 import org.opencv.core.CvType;
 import org.opencv.core.Mat;
 import org.opencv.core.Scalar;
+import org.opencv.core.Size;
+import org.opencv.imgproc.Imgproc;
 import org.opencv.video.BackgroundSubtractorMOG2;
 import org.opencv.video.Video;
 import org.opencv.videoio.VideoCapture;
@@ -71,8 +73,14 @@ public class IotCameraVASupervisor extends AbstractActor {
 	private UniqueKillSwitch killswitch;
 
 	// tools for video analysis
-	private BackgroundSubtractorMOG2 mog2; // =
-											// Video.createBackgroundSubtractorMOG2();
+	private BackgroundSubtractorMOG2 mog2;
+
+	// parameters for image processing
+	private int threshold_value;
+	private int frame_history_length;
+	private int erosion_size;
+	private int dilation_size;
+	private int blur_size;
 
 	// for debug purposes we create a window
 	private JFrame window;
@@ -89,20 +97,20 @@ public class IotCameraVASupervisor extends AbstractActor {
 	public void preStart() {
 		this.cameraActive = false;
 		this.capture = new VideoCapture();
+		this.frame_history_length = 100;
 		this.mog2 = Video.createBackgroundSubtractorMOG2();
 		this.mog2.setDetectShadows(false);
+		this.threshold_value = 200;
+		this.dilation_size = 5;
+		this.erosion_size = 5;
+		this.blur_size = 5;
 
 		// stream
-		// creating an Akka stream Source that pushes frames according to back
+		// Akka stream Source that pushes frames according to back
 		// pressure
 		this.frameSource = Source.fromGraph(new CameraFrameSource(capture));
-		// creating an Akka stream to continuously capture frames @ 33fps
-		// this.stream = frameSource.throttle(33, FiniteDuration.create(1,
-		// TimeUnit.SECONDS), 1,
-		// ThrottleMode.shaping()).viaMat(KillSwitches.single(),
-		// Keep.right()).toMat(Sink.foreach(f -> showFrame(f)), Keep.left());
 
-		// creating a partial akka stream graph that does the video analysis
+		// partial akka stream graph that does the video analysis
 		this.videoAnalysisPartialGraph = GraphDSL.create(builder -> {
 			final UniformFanOutShape<Mat, Mat> A = builder.add(Broadcast.create(2));
 			/*
@@ -114,14 +122,31 @@ public class IotCameraVASupervisor extends AbstractActor {
 				return subtractBackground(f);
 			}).async());
 
-			// final FlowShape<Mat, Mat> bgs = builder.add(Flow.fromGraph(new
-			// MOG2Flow()).async());
+			final FlowShape<Mat, Mat> imgproc = builder.add(Flow.of(Mat.class).map(src -> {
+				Mat temp = new Mat();
+				Mat dst = new Mat();
+				Imgproc.threshold(src, temp, threshold_value, 255, Imgproc.THRESH_BINARY);
+				Imgproc.blur(temp, dst, new Size(2 * blur_size + 1, 2 * blur_size + 1));
+				Mat elementD = Imgproc.getStructuringElement(Imgproc.MORPH_RECT,
+						new Size(2 * dilation_size + 1, 2 * dilation_size + 1));
+				Imgproc.dilate(dst, temp, elementD);
+				Mat elementE = Imgproc.getStructuringElement(Imgproc.MORPH_RECT,
+						new Size(2 * erosion_size + 1, 2 * erosion_size + 1));
+				Imgproc.erode(temp, dst, elementE);
+				Imgproc.dilate(dst, temp, elementD);
+				Imgproc.GaussianBlur(temp, dst, new Size(2 * blur_size + 1, 2 * blur_size + 1), 2 * blur_size);
+				Imgproc.threshold(dst, temp, 50, 255, Imgproc.THRESH_BINARY);
+				Imgproc.erode(temp, dst, elementE);
+
+				return dst;
+			}));
+
 			final FanInShape2<Mat, Mat, Pair<Mat, Mat>> zip = builder.add(ZipWith.create((Mat left, Mat right) -> {
 				return new Pair<Mat, Mat>(left, right);
 			}));
 
 			builder.from(A).toInlet(zip.in1());
-			builder.from(A).via(bgs).toInlet(zip.in0());
+			builder.from(A).via(bgs).via(imgproc).toInlet(zip.in0());
 
 			return new FlowShape<Mat, Pair<Mat, Mat>>(A.in(), zip.out());
 
@@ -161,7 +186,8 @@ public class IotCameraVASupervisor extends AbstractActor {
 	}
 
 	private void startVideoCapture() {
-		this.capture.open(cameraId);
+		// this.capture.open(cameraId);
+		this.capture.open("res/videoplayback.mp4");
 		if (capture.isOpened()) {
 			this.cameraActive = true;
 			killswitch = this.stream.run(materializer);
@@ -174,11 +200,13 @@ public class IotCameraVASupervisor extends AbstractActor {
 	private void stopVideoCapture() {
 
 		if (this.capture.isOpened()) {
+			this.killswitch.shutdown();
 			// release the camera
 			this.capture.release();
+			this.cameraActive = false;
+
 		}
-		this.cameraActive = false;
-		this.killswitch.shutdown();
+
 	}
 
 	private Mat mask(Mat frame) {
