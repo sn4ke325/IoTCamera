@@ -4,8 +4,6 @@ import java.awt.FlowLayout;
 import java.awt.image.BufferedImage;
 import java.awt.image.DataBufferByte;
 import java.awt.image.WritableRaster;
-import java.util.concurrent.CompletionStage;
-import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
@@ -13,33 +11,40 @@ import javax.swing.ImageIcon;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 
+import org.opencv.core.CvType;
 import org.opencv.core.Mat;
+import org.opencv.core.Scalar;
+import org.opencv.video.BackgroundSubtractorMOG2;
+import org.opencv.video.Video;
 import org.opencv.videoio.VideoCapture;
 
-import akka.Done;
 import akka.NotUsed;
 import akka.actor.AbstractActor;
-import akka.actor.ActorRef;
-import akka.actor.ActorSystem;
 import akka.actor.Props;
-import akka.dispatch.ExecutionContexts;
 import akka.event.Logging;
 import akka.event.LoggingAdapter;
 import akka.stream.ActorMaterializer;
 import akka.stream.Attributes;
+import akka.stream.FanInShape2;
+import akka.stream.FlowShape;
+import akka.stream.Graph;
+import akka.stream.Inlet;
 import akka.stream.KillSwitches;
 import akka.stream.Materializer;
 import akka.stream.Outlet;
-import akka.stream.OverflowStrategy;
 import akka.stream.SourceShape;
 import akka.stream.ThrottleMode;
+import akka.stream.UniformFanOutShape;
 import akka.stream.UniqueKillSwitch;
-import akka.stream.impl.ActorPublisher;
+import akka.stream.javadsl.Broadcast;
+import akka.stream.javadsl.Flow;
+import akka.stream.javadsl.GraphDSL;
 import akka.stream.javadsl.Keep;
 import akka.stream.javadsl.RunnableGraph;
 import akka.stream.javadsl.Sink;
 import akka.stream.javadsl.Source;
-import akka.stream.javadsl.SourceQueueWithComplete;
+import akka.stream.javadsl.ZipWith;
+import akka.stream.stage.AbstractInHandler;
 import akka.stream.stage.AbstractOutHandler;
 import akka.stream.stage.GraphStage;
 import akka.stream.stage.GraphStageLogic;
@@ -57,14 +62,19 @@ public class IotCameraVASupervisor extends AbstractActor {
 	private ScheduledExecutorService timer;
 	private Mat frame;
 
-	// streamlining
+	// stream
 	private final Materializer materializer = ActorMaterializer.create(this.getContext());
 	private Source<Mat, NotUsed> frameSource;
+	private Graph<FlowShape<Mat, Pair<Mat, Mat>>, NotUsed> videoAnalysisPartialGraph;
 	// private Sink<Mat,CompletionStage<Mat>> frameSink;
 	private RunnableGraph<UniqueKillSwitch> stream;
 	private UniqueKillSwitch killswitch;
-	// for debug purposes
 
+	// tools for video analysis
+	private BackgroundSubtractorMOG2 mog2; // =
+											// Video.createBackgroundSubtractorMOG2();
+
+	// for debug purposes we create a window
 	private JFrame window;
 	private JLabel lbl;
 
@@ -79,15 +89,50 @@ public class IotCameraVASupervisor extends AbstractActor {
 	public void preStart() {
 		this.cameraActive = false;
 		this.capture = new VideoCapture();
+		this.mog2 = Video.createBackgroundSubtractorMOG2();
+		this.mog2.setDetectShadows(false);
 
-		// streamlining
+		// stream
 		// creating an Akka stream Source that pushes frames according to back
 		// pressure
 		this.frameSource = Source.fromGraph(new CameraFrameSource(capture));
-		// creating an Akka stream to coninuosly capture frames @ 33fps
+		// creating an Akka stream to continuously capture frames @ 33fps
+		// this.stream = frameSource.throttle(33, FiniteDuration.create(1,
+		// TimeUnit.SECONDS), 1,
+		// ThrottleMode.shaping()).viaMat(KillSwitches.single(),
+		// Keep.right()).toMat(Sink.foreach(f -> showFrame(f)), Keep.left());
+
+		// creating a partial akka stream graph that does the video analysis
+		this.videoAnalysisPartialGraph = GraphDSL.create(builder -> {
+			final UniformFanOutShape<Mat, Mat> A = builder.add(Broadcast.create(2));
+			/*
+			 * final FlowShape<Mat, Mat> mask =
+			 * builder.add(Flow.of(Mat.class).map(f -> { return f; }));
+			 */
+
+			final FlowShape<Mat, Mat> bgs = builder.add(Flow.of(Mat.class).map(f -> {
+				return subtractBackground(f);
+			}).async());
+
+			// final FlowShape<Mat, Mat> bgs = builder.add(Flow.fromGraph(new
+			// MOG2Flow()).async());
+			final FanInShape2<Mat, Mat, Pair<Mat, Mat>> zip = builder.add(ZipWith.create((Mat left, Mat right) -> {
+				return new Pair<Mat, Mat>(left, right);
+			}));
+
+			builder.from(A).toInlet(zip.in1());
+			builder.from(A).via(bgs).toInlet(zip.in0());
+
+			return new FlowShape<Mat, Pair<Mat, Mat>>(A.in(), zip.out());
+
+		});
+
 		this.stream = frameSource.throttle(33, FiniteDuration.create(1, TimeUnit.SECONDS), 1, ThrottleMode.shaping())
-				.viaMat(KillSwitches.single(), Keep.right()).toMat(Sink.foreach(f -> showFrame(f)), Keep.left());
+				.via(this.videoAnalysisPartialGraph).map(p -> p.first()).viaMat(KillSwitches.single(), Keep.right())
+				.toMat(Sink.foreach(f -> showFrame(f)), Keep.left());
+
 		// for debug purposes we create a window to watch the video
+
 		this.window = new JFrame();
 		this.window.setLayout(new FlowLayout());
 		this.window.setSize(1280, 720);
@@ -95,6 +140,24 @@ public class IotCameraVASupervisor extends AbstractActor {
 		this.window.add(lbl);
 		this.window.setVisible(true);
 		this.window.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
+
+		// test
+		/*
+		 * new Thread(() -> { this.capture = new VideoCapture(); this.mog2 =
+		 * Video.createBackgroundSubtractorMOG2();
+		 * 
+		 * this.capture.open(cameraId); if (capture.isOpened()) {
+		 * System.out.println("Capture is opened"); // Mat i = new Mat(100,100,
+		 * CvType.CV_8SC3 , new Scalar(0,0,0)); // //crea una immagine nera Mat
+		 * i = new Mat(); Mat j = new Mat(); capture.read(i); new Thread(() -> {
+		 * System.out.println("Before mog2"); mog2.apply(i, j); showFrame(j);
+		 * }).start(); // this.subtractBackground(i);
+		 * 
+		 * } this.capture.release(); }).start();
+		 * 
+		 * // end test
+		 * 
+		 */
 	}
 
 	private void startVideoCapture() {
@@ -106,6 +169,22 @@ public class IotCameraVASupervisor extends AbstractActor {
 		} else {
 			System.err.println("Can't open camera connection.");
 		}
+	}
+
+	private void stopVideoCapture() {
+
+		if (this.capture.isOpened()) {
+			// release the camera
+			this.capture.release();
+		}
+		this.cameraActive = false;
+		this.killswitch.shutdown();
+	}
+
+	private Mat mask(Mat frame) {
+		// todo
+
+		return frame;
 	}
 
 	private void showFrame(Mat frame) {
@@ -131,16 +210,14 @@ public class IotCameraVASupervisor extends AbstractActor {
 
 	}
 
-	private void stopVideoCapture() {
+	private Mat subtractBackground(Mat frame) {
 
-		if (this.capture.isOpened()) {
-			// release the camera
-			this.capture.release();
-		}
-		this.cameraActive = false;
-		this.killswitch.shutdown();
+		Mat fgmask = new Mat();
+		mog2.apply(frame, fgmask);
+		return fgmask;
 	}
 
+	// not needed
 	private Mat grabFrame() {
 		Mat frame = new Mat();
 
@@ -215,3 +292,74 @@ class CameraFrameSource extends GraphStage<SourceShape<Mat>> {
 	}
 
 }
+
+// creating a flow that applies MOG2 to a frame and returns the foreground mask
+// as a new frame
+
+class MOG2Flow extends GraphStage<FlowShape<Mat, Mat>> {
+
+	public final Inlet<Mat> in = Inlet.create("MOG2Flow.in");
+	public final Outlet<Mat> out = Outlet.create("MOG2Flow.out");
+	private final FlowShape<Mat, Mat> shape = FlowShape.of(in, out);
+	private BackgroundSubtractorMOG2 mog2;
+
+	public MOG2Flow() {
+		mog2 = Video.createBackgroundSubtractorMOG2();
+		mog2.setDetectShadows(false);
+	}
+
+	@Override
+	public FlowShape<Mat, Mat> shape() {
+
+		return shape;
+	}
+
+	@Override
+	public GraphStageLogic createLogic(Attributes inheritedAttributes) throws Exception {
+
+		return new GraphStageLogic(shape) {
+
+			{
+				setHandler(in, new AbstractInHandler() {
+					public void onPush() {
+						Mat frame = grab(in);
+						Mat fgmask = new Mat();
+						mog2.apply(frame, fgmask);
+						push(out, fgmask);
+					}
+				});
+				setHandler(out, new AbstractOutHandler() {
+					public void onPull() throws Exception {
+						pull(in);
+					}
+				});
+			}
+
+		};
+	}
+
+}
+
+class Pair<T1, T2> {
+
+	private T1 A;
+	private T2 B;
+
+	public Pair(T1 f, T2 s) {
+		this.A = f;
+		this.B = s;
+
+	}
+
+	public T1 first() {
+		return A;
+	}
+
+	public T2 second() {
+		return B;
+	}
+
+}
+
+// Creating a graph that does the Video analysis and returns frames of the
+// captured image with rectangles around tracked people
