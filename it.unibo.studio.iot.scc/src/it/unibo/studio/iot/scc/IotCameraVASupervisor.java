@@ -4,6 +4,8 @@ import java.awt.FlowLayout;
 import java.awt.image.BufferedImage;
 import java.awt.image.DataBufferByte;
 import java.awt.image.WritableRaster;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
@@ -13,6 +15,7 @@ import javax.swing.JLabel;
 
 import org.opencv.core.CvType;
 import org.opencv.core.Mat;
+import org.opencv.core.MatOfPoint;
 import org.opencv.core.Scalar;
 import org.opencv.core.Size;
 import org.opencv.imgproc.Imgproc;
@@ -67,7 +70,7 @@ public class IotCameraVASupervisor extends AbstractActor {
 	// stream
 	private final Materializer materializer = ActorMaterializer.create(this.getContext());
 	private Source<Mat, NotUsed> frameSource;
-	private Graph<FlowShape<Mat, Pair<Mat, Mat>>, NotUsed> videoAnalysisPartialGraph;
+	private Graph<FlowShape<Mat, Mat>, NotUsed> videoAnalysisPartialGraph;
 	// private Sink<Mat,CompletionStage<Mat>> frameSink;
 	private RunnableGraph<UniqueKillSwitch> stream;
 	private UniqueKillSwitch killswitch;
@@ -101,7 +104,7 @@ public class IotCameraVASupervisor extends AbstractActor {
 		this.mog2 = Video.createBackgroundSubtractorMOG2();
 		this.mog2.setDetectShadows(false);
 		this.threshold_value = 200;
-		this.dilation_size = 5;
+		this.dilation_size = 12;
 		this.erosion_size = 5;
 		this.blur_size = 5;
 
@@ -141,19 +144,30 @@ public class IotCameraVASupervisor extends AbstractActor {
 				return dst;
 			}));
 
-			final FanInShape2<Mat, Mat, Pair<Mat, Mat>> zip = builder.add(ZipWith.create((Mat left, Mat right) -> {
-				return new Pair<Mat, Mat>(left, right);
+			final FlowShape<Mat, List<MatOfPoint>> find_rect = builder.add(Flow.of(Mat.class).map(src -> {
+				List<MatOfPoint> contours = new ArrayList<MatOfPoint>();
+				Mat hierarchy = new Mat();
+				Imgproc.findContours(src, contours, hierarchy, Imgproc.RETR_CCOMP, Imgproc.CHAIN_APPROX_SIMPLE);
+				return contours;
 			}));
+			
 
+			final FanInShape2<List<MatOfPoint>, Mat, Mat> zip = builder.add(ZipWith.create((List<MatOfPoint> left, Mat right) -> {
+				int idx=0;
+				Imgproc.drawContours(right, left, idx++, new Scalar(255,0,0));
+				
+				return right;
+			}));
+			
 			builder.from(A).toInlet(zip.in1());
-			builder.from(A).via(bgs).via(imgproc).toInlet(zip.in0());
+			builder.from(A).via(bgs).via(imgproc).via(find_rect).toInlet(zip.in0());
 
-			return new FlowShape<Mat, Pair<Mat, Mat>>(A.in(), zip.out());
+			return new FlowShape<Mat, Mat>(A.in(), zip.out());
 
 		});
 
 		this.stream = frameSource.throttle(33, FiniteDuration.create(1, TimeUnit.SECONDS), 1, ThrottleMode.shaping())
-				.via(this.videoAnalysisPartialGraph).map(p -> p.first()).viaMat(KillSwitches.single(), Keep.right())
+				.via(this.videoAnalysisPartialGraph).viaMat(KillSwitches.single(), Keep.right())
 				.toMat(Sink.foreach(f -> showFrame(f)), Keep.left());
 
 		// for debug purposes we create a window to watch the video
