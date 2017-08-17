@@ -16,6 +16,8 @@ import javax.swing.JLabel;
 import org.opencv.core.CvType;
 import org.opencv.core.Mat;
 import org.opencv.core.MatOfPoint;
+import org.opencv.core.Point;
+import org.opencv.core.Rect;
 import org.opencv.core.Scalar;
 import org.opencv.core.Size;
 import org.opencv.imgproc.Imgproc;
@@ -79,6 +81,8 @@ public class IotCameraVASupervisor extends AbstractActor {
 	private BackgroundSubtractorMOG2 mog2;
 
 	// parameters for image processing
+	private Rect roi_rectangle;
+	private boolean usemask;
 	private int threshold_value;
 	private int frame_history_length;
 	private int erosion_size;
@@ -88,6 +92,7 @@ public class IotCameraVASupervisor extends AbstractActor {
 	// for debug purposes we create a window
 	private JFrame window;
 	private JLabel lbl;
+	private JLabel lbl1;
 
 	public IotCameraVASupervisor(int cameraId) {
 		this.cameraId = cameraId;
@@ -100,6 +105,8 @@ public class IotCameraVASupervisor extends AbstractActor {
 	public void preStart() {
 		this.cameraActive = false;
 		this.capture = new VideoCapture();
+		this.usemask = true;
+		this.roi_rectangle = new Rect(0, 100, 480, 180);
 		this.frame_history_length = 100;
 		this.mog2 = Video.createBackgroundSubtractorMOG2();
 		this.mog2.setDetectShadows(false);
@@ -116,10 +123,24 @@ public class IotCameraVASupervisor extends AbstractActor {
 		// partial akka stream graph that does the video analysis
 		this.videoAnalysisPartialGraph = GraphDSL.create(builder -> {
 			final UniformFanOutShape<Mat, Mat> A = builder.add(Broadcast.create(2));
-			/*
-			 * final FlowShape<Mat, Mat> mask =
-			 * builder.add(Flow.of(Mat.class).map(f -> { return f; }));
-			 */
+
+			final FlowShape<Mat, Mat> mask = builder.add(Flow.of(Mat.class).map(f -> {
+				if (usemask) {
+					// creo una nuova immagine nera delle stesse dimensioni del
+					// frame
+					Mat zeromask = Mat.zeros(f.size(), CvType.CV_8U);
+					// metto ad 1 nella maschera i pixel che voglio che
+					// rimangano visibili
+					zeromask.submat(roi_rectangle).setTo(new Scalar(255));
+					Mat output = new Mat(f.size(), f.type());
+					f.copyTo(output, zeromask);
+					lbl1.setIcon(new ImageIcon(MatToBufferedImage(output)));
+					window.repaint();
+					return output;
+
+				}
+				return f;
+			}));
 
 			final FlowShape<Mat, Mat> bgs = builder.add(Flow.of(Mat.class).map(f -> {
 				return subtractBackground(f);
@@ -150,17 +171,21 @@ public class IotCameraVASupervisor extends AbstractActor {
 				Imgproc.findContours(src, contours, hierarchy, Imgproc.RETR_CCOMP, Imgproc.CHAIN_APPROX_SIMPLE);
 				return contours;
 			}));
-			
 
-			final FanInShape2<List<MatOfPoint>, Mat, Mat> zip = builder.add(ZipWith.create((List<MatOfPoint> left, Mat right) -> {
-				int idx=0;
-				Imgproc.drawContours(right, left, idx++, new Scalar(255,0,0));
-				
-				return right;
-			}));
-			
+			final FanInShape2<List<MatOfPoint>, Mat, Mat> zip = builder
+					.add(ZipWith.create((List<MatOfPoint> left, Mat right) -> {
+						int idx = 0;
+						Imgproc.drawContours(right, left, idx++, new Scalar(255, 0, 0));
+						Imgproc.rectangle(right, new Point(roi_rectangle.x, roi_rectangle.y),
+								new Point(roi_rectangle.x + roi_rectangle.width,
+										roi_rectangle.y + roi_rectangle.height),
+								new Scalar(0, 255, 0));
+
+						return right;
+					}));
+
 			builder.from(A).toInlet(zip.in1());
-			builder.from(A).via(bgs).via(imgproc).via(find_rect).toInlet(zip.in0());
+			builder.from(A).via(mask).via(bgs).via(imgproc).via(find_rect).toInlet(zip.in0());
 
 			return new FlowShape<Mat, Mat>(A.in(), zip.out());
 
@@ -176,7 +201,9 @@ public class IotCameraVASupervisor extends AbstractActor {
 		this.window.setLayout(new FlowLayout());
 		this.window.setSize(1280, 720);
 		this.lbl = new JLabel();
+		this.lbl1 = new JLabel();
 		this.window.add(lbl);
+		this.window.add(lbl1);
 		this.window.setVisible(true);
 		this.window.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
 

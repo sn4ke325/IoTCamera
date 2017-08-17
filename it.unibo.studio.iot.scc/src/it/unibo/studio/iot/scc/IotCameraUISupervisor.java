@@ -6,6 +6,9 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.util.Arrays;
+import java.util.Iterator;
+import java.util.List;
 
 import javax.imageio.ImageIO;
 import javax.swing.ImageIcon;
@@ -37,27 +40,7 @@ public class IotCameraUISupervisor extends AbstractActor {
 	private Canvas canvas;
 
 	public void preStart() {
-	/*//testing IO	
-	 BufferedImage img;
-	try {
-		img = ImageIO.read(new File("./res/001.png"));
-		ImageIcon icon = new ImageIcon(img);
-		JFrame frame = new JFrame();
-		frame.setLayout(new FlowLayout());
-		frame.setSize(200, 300);
-		JLabel lbl = new JLabel();
-		lbl.setIcon(icon);
-		frame.add(lbl);
-		frame.setVisible(true);
-		frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-		
-	} catch (IOException e1) {
-		// TODO Auto-generated catch block
-		e1.printStackTrace();
-	}
-	*/
-	 
-	 
+
 		try {
 			this.startConsole();
 		} catch (IOException e) {
@@ -71,13 +54,14 @@ public class IotCameraUISupervisor extends AbstractActor {
 	}
 
 	private void startConsole() throws IOException {
-		String input = "";
+		String[] input = null;
 		String output = "";
 		BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
 		while (true) {
 			System.out.println("Type your command");
-			input = br.readLine();
-			switch (input) {
+			input = br.readLine().split(" -");
+			Iterator<String> command_line = Arrays.asList(input).iterator();			
+			switch (command_line.next()) {
 			case "start": {
 				this.getContext().actorSelection("/user/iot-camera-supervisor/video-analysis-supervisor")
 						.tell(new StartVideoCapture(), this.getSelf());
