@@ -63,8 +63,19 @@ public class IotCameraUISupervisor extends AbstractActor {
 			Iterator<String> command_line = Arrays.asList(input).iterator();			
 			switch (command_line.next()) {
 			case "start": {
+				StartVideoCapture message = new StartVideoCapture();
+					while(command_line.hasNext()){
+						switch(command_line.next()){
+						case "d":
+						case "debug":{
+							message = new StartVideoCapture(true);
+						}
+						default:
+							break;
+						}
+					}
 				this.getContext().actorSelection("/user/iot-camera-supervisor/video-analysis-supervisor")
-						.tell(new StartVideoCapture(), this.getSelf());
+						.tell(message, this.getSelf());
 				output = "Sent message to Start Video Capture";
 			}
 				break;

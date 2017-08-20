@@ -66,8 +66,8 @@ public class IotCameraVASupervisor extends AbstractActor {
 	private boolean cameraActive;
 	private VideoCapture capture;
 	private int cameraId;
-	private ScheduledExecutorService timer;
 	private Mat frame;
+	private boolean video_debug;
 
 	// stream
 	private final Materializer materializer = ActorMaterializer.create(this.getContext());
@@ -105,6 +105,7 @@ public class IotCameraVASupervisor extends AbstractActor {
 	public void preStart() {
 		this.cameraActive = false;
 		this.capture = new VideoCapture();
+
 		this.usemask = true;
 		this.roi_rectangle = new Rect(0, 100, 480, 180);
 		this.frame_history_length = 100;
@@ -126,17 +127,12 @@ public class IotCameraVASupervisor extends AbstractActor {
 
 			final FlowShape<Mat, Mat> mask = builder.add(Flow.of(Mat.class).map(f -> {
 				if (usemask) {
-					// creo una nuova immagine nera delle stesse dimensioni del
-					// frame
-					Mat zeromask = Mat.zeros(f.size(), CvType.CV_8U);
-					// metto ad 1 nella maschera i pixel che voglio che
-					// rimangano visibili
-					zeromask.submat(roi_rectangle).setTo(new Scalar(255));
-					Mat output = new Mat(f.size(), f.type());
-					f.copyTo(output, zeromask);
-					lbl1.setIcon(new ImageIcon(MatToBufferedImage(output)));
-					window.repaint();
-					return output;
+
+					/*
+					 * lbl1.setIcon(new ImageIcon(MatToBufferedImage(output)));
+					 * window.repaint();
+					 */
+					return mask(f, roi_rectangle);
 
 				}
 				return f;
@@ -193,40 +189,32 @@ public class IotCameraVASupervisor extends AbstractActor {
 
 		this.stream = frameSource.throttle(33, FiniteDuration.create(1, TimeUnit.SECONDS), 1, ThrottleMode.shaping())
 				.via(this.videoAnalysisPartialGraph).viaMat(KillSwitches.single(), Keep.right())
-				.toMat(Sink.foreach(f -> showFrame(f)), Keep.left());
+				.toMat(Sink.foreach(f -> showFrame(f, lbl)), Keep.left());
 
 		// for debug purposes we create a window to watch the video
-
-		this.window = new JFrame();
-		this.window.setLayout(new FlowLayout());
-		this.window.setSize(1280, 720);
-		this.lbl = new JLabel();
-		this.lbl1 = new JLabel();
-		this.window.add(lbl);
-		this.window.add(lbl1);
-		this.window.setVisible(true);
-		this.window.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
-
-		// test
 		/*
-		 * new Thread(() -> { this.capture = new VideoCapture(); this.mog2 =
-		 * Video.createBackgroundSubtractorMOG2();
-		 * 
-		 * this.capture.open(cameraId); if (capture.isOpened()) {
-		 * System.out.println("Capture is opened"); // Mat i = new Mat(100,100,
-		 * CvType.CV_8SC3 , new Scalar(0,0,0)); // //crea una immagine nera Mat
-		 * i = new Mat(); Mat j = new Mat(); capture.read(i); new Thread(() -> {
-		 * System.out.println("Before mog2"); mog2.apply(i, j); showFrame(j);
-		 * }).start(); // this.subtractBackground(i);
-		 * 
-		 * } this.capture.release(); }).start();
-		 * 
-		 * // end test
-		 * 
+		 * this.window = new JFrame(); this.window.setLayout(new FlowLayout());
+		 * this.window.setSize(1280, 720); this.lbl = new JLabel(); this.lbl1 =
+		 * new JLabel(); this.window.add(lbl); this.window.add(lbl1);
+		 * this.window.setVisible(true);
+		 * this.window.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
 		 */
+
 	}
 
 	private void startVideoCapture() {
+
+		if (this.video_debug) {
+			this.window = new JFrame();
+			this.window.setLayout(new FlowLayout());
+			this.window.setSize(1280, 720);
+			this.lbl = new JLabel();
+			this.lbl1 = new JLabel();
+			this.window.add(lbl);
+			this.window.add(lbl1);
+			this.window.setVisible(true);
+			this.window.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
+		}
 		// this.capture.open(cameraId);
 		this.capture.open("res/videoplayback.mp4");
 		if (capture.isOpened()) {
@@ -240,6 +228,9 @@ public class IotCameraVASupervisor extends AbstractActor {
 
 	private void stopVideoCapture() {
 
+		if (this.video_debug) {
+			this.window.dispose();
+		}
 		if (this.capture.isOpened()) {
 			this.killswitch.shutdown();
 			// release the camera
@@ -250,15 +241,17 @@ public class IotCameraVASupervisor extends AbstractActor {
 
 	}
 
-	private Mat mask(Mat frame) {
-		// todo
-
-		return frame;
+	private Mat mask(Mat f, Rect roi) {
+		Mat zeromask = Mat.zeros(f.size(), CvType.CV_8U);
+		zeromask.submat(roi).setTo(new Scalar(255));
+		Mat output = new Mat(f.size(), f.type());
+		f.copyTo(output, zeromask);
+		return output;
 	}
 
-	private void showFrame(Mat frame) {
+	private void showFrame(Mat frame, JLabel label) {
 
-		lbl.setIcon(new ImageIcon(MatToBufferedImage(frame)));
+		label.setIcon(new ImageIcon(MatToBufferedImage(frame)));
 		window.repaint();
 
 	}
@@ -305,6 +298,7 @@ public class IotCameraVASupervisor extends AbstractActor {
 	public Receive createReceive() {
 		return receiveBuilder().match(StartVideoCapture.class, r -> {
 			log.info("Starting Video Capture and Analysis");
+			this.video_debug = r.withVideo();
 			this.startVideoCapture();
 			getSender().tell(new VideoCaptureStarted(), this.getSelf());
 		}).match(StopVideoCapture.class, r -> {
