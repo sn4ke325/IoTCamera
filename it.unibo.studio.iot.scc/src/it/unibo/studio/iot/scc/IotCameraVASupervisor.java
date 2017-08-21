@@ -16,6 +16,7 @@ import javax.swing.JLabel;
 import org.opencv.core.CvType;
 import org.opencv.core.Mat;
 import org.opencv.core.MatOfPoint;
+import org.opencv.core.MatOfPoint2f;
 import org.opencv.core.Point;
 import org.opencv.core.Rect;
 import org.opencv.core.Scalar;
@@ -161,29 +162,57 @@ public class IotCameraVASupervisor extends AbstractActor {
 				return dst;
 			}));
 
-			final FlowShape<Mat, List<MatOfPoint>> find_rect = builder.add(Flow.of(Mat.class).map(src -> {
+			final FlowShape<Mat, List<MatOfPoint>> find_contours = builder.add(Flow.of(Mat.class).map(src -> {
 				List<MatOfPoint> contours = new ArrayList<MatOfPoint>();
 				Mat hierarchy = new Mat();
 				Imgproc.findContours(src, contours, hierarchy, Imgproc.RETR_CCOMP, Imgproc.CHAIN_APPROX_SIMPLE);
 				return contours;
 			}));
 
-			final FanInShape2<List<MatOfPoint>, Mat, Mat> zip = builder
+			final FlowShape<List<MatOfPoint>, List<Rect>> find_rect = builder.add(Flow.fromFunction(src -> {
+				List<Rect> rect = new ArrayList<Rect>();
+				MatOfPoint2f approxCurve = new MatOfPoint2f();
+				for (int i = 0; i < src.size(); i++) {
+					MatOfPoint2f contour2f = new MatOfPoint2f(src.get(i).toArray());
+					double approxDistance = Imgproc.arcLength(contour2f, true) * 0.02;
+					Imgproc.approxPolyDP(contour2f, approxCurve, approxDistance, true);
+					MatOfPoint points = new MatOfPoint(approxCurve.toArray());
+					Rect r = Imgproc.boundingRect(points);
+					rect.add(r);
+				}
+
+				return rect;
+			}));
+
+			/*final FanInShape2<List<MatOfPoint>, Mat, Mat> zip = builder
 					.add(ZipWith.create((List<MatOfPoint> left, Mat right) -> {
 						int idx = 0;
 						Imgproc.drawContours(right, left, idx++, new Scalar(255, 0, 0));
+						// draws unmasked area
 						Imgproc.rectangle(right, new Point(roi_rectangle.x, roi_rectangle.y),
 								new Point(roi_rectangle.x + roi_rectangle.width,
 										roi_rectangle.y + roi_rectangle.height),
 								new Scalar(0, 255, 0));
 
 						return right;
-					}));
+					}));*/
+			
+			final FanInShape2<List<Rect>, Mat, Mat> zipr = builder.add(ZipWith.create((List<Rect> left, Mat right) -> {
+				for (Rect r : left) {
+					Imgproc.rectangle(right, new Point(r.x, r.y), new Point(r.x + r.width, r.y + r.height),
+							new Scalar(255, 0, 0));
+				}
+				// draws unmasked area
+				Imgproc.rectangle(right, new Point(roi_rectangle.x, roi_rectangle.y),
+						new Point(roi_rectangle.x + roi_rectangle.width, roi_rectangle.y + roi_rectangle.height),
+						new Scalar(0, 255, 0));
+				return right;
+			}));
 
-			builder.from(A).toInlet(zip.in1());
-			builder.from(A).via(mask).via(bgs).via(imgproc).via(find_rect).toInlet(zip.in0());
+			builder.from(A).toInlet(zipr.in1());
+			builder.from(A).via(mask).via(bgs).via(imgproc).via(find_contours).via(find_rect).toInlet(zipr.in0());
 
-			return new FlowShape<Mat, Mat>(A.in(), zip.out());
+			return new FlowShape<Mat, Mat>(A.in(), zipr.out());
 
 		});
 
