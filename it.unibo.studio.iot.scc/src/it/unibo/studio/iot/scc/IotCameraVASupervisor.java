@@ -86,6 +86,7 @@ public class IotCameraVASupervisor extends AbstractActor {
 	private boolean usemask;
 	private int threshold_value;
 	private int frame_history_length;
+	private int frame_history_passed;
 	private int erosion_size;
 	private int dilation_size;
 	private int blur_size;
@@ -106,12 +107,13 @@ public class IotCameraVASupervisor extends AbstractActor {
 	public void preStart() {
 		this.cameraActive = false;
 		this.capture = new VideoCapture();
-
+		// default parameters
 		this.usemask = true;
 		this.roi_rectangle = new Rect(0, 100, 480, 180);
-		this.frame_history_length = 100;
+		this.frame_history_length = 120;
 		this.mog2 = Video.createBackgroundSubtractorMOG2();
 		this.mog2.setDetectShadows(false);
+		this.mog2.setHistory(frame_history_length);
 		this.threshold_value = 200;
 		this.dilation_size = 12;
 		this.erosion_size = 5;
@@ -164,8 +166,10 @@ public class IotCameraVASupervisor extends AbstractActor {
 
 			final FlowShape<Mat, List<MatOfPoint>> find_contours = builder.add(Flow.of(Mat.class).map(src -> {
 				List<MatOfPoint> contours = new ArrayList<MatOfPoint>();
-				Mat hierarchy = new Mat();
-				Imgproc.findContours(src, contours, hierarchy, Imgproc.RETR_CCOMP, Imgproc.CHAIN_APPROX_SIMPLE);
+				if (!(frame_history_passed < frame_history_length)) {
+					Mat hierarchy = new Mat();
+					Imgproc.findContours(src, contours, hierarchy, Imgproc.RETR_CCOMP, Imgproc.CHAIN_APPROX_SIMPLE);
+				}
 				return contours;
 			}));
 
@@ -184,19 +188,18 @@ public class IotCameraVASupervisor extends AbstractActor {
 				return rect;
 			}));
 
-			/*final FanInShape2<List<MatOfPoint>, Mat, Mat> zip = builder
-					.add(ZipWith.create((List<MatOfPoint> left, Mat right) -> {
-						int idx = 0;
-						Imgproc.drawContours(right, left, idx++, new Scalar(255, 0, 0));
-						// draws unmasked area
-						Imgproc.rectangle(right, new Point(roi_rectangle.x, roi_rectangle.y),
-								new Point(roi_rectangle.x + roi_rectangle.width,
-										roi_rectangle.y + roi_rectangle.height),
-								new Scalar(0, 255, 0));
+			/*
+			 * final FanInShape2<List<MatOfPoint>, Mat, Mat> zip = builder
+			 * .add(ZipWith.create((List<MatOfPoint> left, Mat right) -> { int
+			 * idx = 0; Imgproc.drawContours(right, left, idx++, new Scalar(255,
+			 * 0, 0)); // draws unmasked area Imgproc.rectangle(right, new
+			 * Point(roi_rectangle.x, roi_rectangle.y), new
+			 * Point(roi_rectangle.x + roi_rectangle.width, roi_rectangle.y +
+			 * roi_rectangle.height), new Scalar(0, 255, 0));
+			 * 
+			 * return right; }));
+			 */
 
-						return right;
-					}));*/
-			
 			final FanInShape2<List<Rect>, Mat, Mat> zipr = builder.add(ZipWith.create((List<Rect> left, Mat right) -> {
 				for (Rect r : left) {
 					Imgproc.rectangle(right, new Point(r.x, r.y), new Point(r.x + r.width, r.y + r.height),
@@ -246,6 +249,7 @@ public class IotCameraVASupervisor extends AbstractActor {
 		}
 		// this.capture.open(cameraId);
 		this.capture.open("res/videoplayback.mp4");
+		this.frame_history_passed = 0;
 		if (capture.isOpened()) {
 			this.cameraActive = true;
 			killswitch = this.stream.run(materializer);
@@ -302,7 +306,8 @@ public class IotCameraVASupervisor extends AbstractActor {
 	}
 
 	private Mat subtractBackground(Mat frame) {
-
+		if (frame_history_passed < frame_history_length)
+			frame_history_passed++;
 		Mat fgmask = new Mat();
 		mog2.apply(frame, fgmask);
 		return fgmask;
