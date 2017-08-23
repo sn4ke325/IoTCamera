@@ -91,7 +91,15 @@ public class IotCameraVASupervisor extends AbstractActor {
 	private int dilation_size;
 	private int blur_size;
 
-	// for debug purposes we create a window
+	// blob weight and filtering
+	private int minimum_blob_width; // boundingbox
+	private int minimum_blob_height; // boundingbox
+	private double minimum_blob_area; // contour
+	
+	//In and out counting area should be submatrixes of roi
+	private Rect in_zone, out_zone, crossing_zone;
+
+	// for debug purposes we would like to create a window
 	private JFrame window;
 	private JLabel lbl;
 	private JLabel lbl1;
@@ -118,6 +126,11 @@ public class IotCameraVASupervisor extends AbstractActor {
 		this.dilation_size = 12;
 		this.erosion_size = 5;
 		this.blur_size = 5;
+		this.minimum_blob_area = 20;
+		this.minimum_blob_height = 50;
+		this.minimum_blob_width = 50;
+		this.in_zone = new Rect(roi_rectangle.x, roi_rectangle.y, 30, roi_rectangle.height);
+		this.out_zone = new Rect(roi_rectangle.x+roi_rectangle.width-30,roi_rectangle.y, 30, roi_rectangle.height);
 
 		// stream
 		// Akka stream Source that pushes frames according to back
@@ -173,19 +186,21 @@ public class IotCameraVASupervisor extends AbstractActor {
 				return contours;
 			}));
 
-			final FlowShape<List<MatOfPoint>, List<Rect>> find_rect = builder.add(Flow.fromFunction(src -> {
-				List<Rect> rect = new ArrayList<Rect>();
-				MatOfPoint2f approxCurve = new MatOfPoint2f();
+			final FlowShape<List<MatOfPoint>, List<Blob>> find_blobs = builder.add(Flow.fromFunction(src -> {
+				List<Blob> blobs = new ArrayList<Blob>();
 				for (int i = 0; i < src.size(); i++) {
-					MatOfPoint2f contour2f = new MatOfPoint2f(src.get(i).toArray());
-					double approxDistance = Imgproc.arcLength(contour2f, true) * 0.02;
-					Imgproc.approxPolyDP(contour2f, approxCurve, approxDistance, true);
-					MatOfPoint points = new MatOfPoint(approxCurve.toArray());
-					Rect r = Imgproc.boundingRect(points);
-					rect.add(r);
+					Blob b = new Blob(src.get(i));
+					// filter blobs that are too small
+					if (!(b.getBoundingBox().width < minimum_blob_width
+							|| b.getBoundingBox().height < minimum_blob_height)) {
+
+						// set blob weight by area TODO
+						b.setWeight(1);
+						blobs.add(b);
+					}
 				}
 
-				return rect;
+				return blobs;
 			}));
 
 			/*
@@ -200,20 +215,29 @@ public class IotCameraVASupervisor extends AbstractActor {
 			 * return right; }));
 			 */
 
-			final FanInShape2<List<Rect>, Mat, Mat> zipr = builder.add(ZipWith.create((List<Rect> left, Mat right) -> {
-				for (Rect r : left) {
+			final FanInShape2<List<Blob>, Mat, Mat> zipr = builder.add(ZipWith.create((List<Blob> left, Mat right) -> {
+				for (Blob b : left) {
+					Rect r = b.getBoundingBox();
 					Imgproc.rectangle(right, new Point(r.x, r.y), new Point(r.x + r.width, r.y + r.height),
 							new Scalar(255, 0, 0));
+					Imgproc.circle(right, b.getCentroid(), 2, new Scalar(255, 0, 0));
 				}
 				// draws unmasked area
 				Imgproc.rectangle(right, new Point(roi_rectangle.x, roi_rectangle.y),
 						new Point(roi_rectangle.x + roi_rectangle.width, roi_rectangle.y + roi_rectangle.height),
+						new Scalar(255, 255, 0));
+				//draw areas
+				Imgproc.rectangle(right, new Point(in_zone.x, in_zone.y),
+						new Point(in_zone.x + in_zone.width, in_zone.y + in_zone.height),
 						new Scalar(0, 255, 0));
+				Imgproc.rectangle(right, new Point(out_zone.x, out_zone.y),
+						new Point(out_zone.x + out_zone.width, out_zone.y + out_zone.height),
+						new Scalar(0, 0, 255));
 				return right;
 			}));
 
 			builder.from(A).toInlet(zipr.in1());
-			builder.from(A).via(mask).via(bgs).via(imgproc).via(find_contours).via(find_rect).toInlet(zipr.in0());
+			builder.from(A).via(mask).via(bgs).via(imgproc).via(find_contours).via(find_blobs).toInlet(zipr.in0());
 
 			return new FlowShape<Mat, Mat>(A.in(), zipr.out());
 

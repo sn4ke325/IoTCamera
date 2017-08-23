@@ -14,10 +14,10 @@ public class Blob {
 	private Rect boundingBox;
 	private int id;
 	private boolean alive;
+	private int weight; //how many people the blob contains
 
-	public Blob(MatOfPoint points, int id) {
+	public Blob(MatOfPoint points) {
 		this.p = points;
-		this.id = id;
 		this.boundingBox = computeBoundingBox(p);
 		this.area = Imgproc.contourArea(p);
 		Moments M = Imgproc.moments(points);
@@ -27,9 +27,13 @@ public class Blob {
 		this.alive = true;
 	}
 
-	public Blob(MatOfPoint points, Rect box, int id) {
-		this(points, id);
+	public Blob(MatOfPoint points, Rect box) {
+		this(points);
 		this.boundingBox = box;
+	}
+
+	public void setID(int id) {
+		this.id = id;
 	}
 
 	public MatOfPoint getContours() {
@@ -50,6 +54,18 @@ public class Blob {
 
 	public int id() {
 		return id;
+	}
+
+	public void setWeight(int w) {
+		this.weight = w;
+	}
+
+	public int weight() {
+		return weight;
+	}
+
+	public boolean isAlive() {
+		return alive;
 	}
 
 	public void kill() {
