@@ -1,5 +1,8 @@
 package it.unibo.studio.iot.scc;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import org.opencv.core.MatOfPoint;
 import org.opencv.core.MatOfPoint2f;
 import org.opencv.core.Point;
@@ -14,7 +17,7 @@ public class Blob {
 	private Rect boundingBox;
 	private int id;
 	private boolean alive;
-	private int weight; //how many people the blob contains
+	private int weight; // how many people the blob contains
 
 	public Blob(MatOfPoint points) {
 		this.p = points;
@@ -71,6 +74,7 @@ public class Blob {
 	public void kill() {
 		this.alive = false;
 	}
+
 
 	private Rect computeBoundingBox(MatOfPoint points) {
 		MatOfPoint2f approxCurve = new MatOfPoint2f();
