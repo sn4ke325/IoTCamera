@@ -28,6 +28,7 @@ import org.opencv.videoio.VideoCapture;
 
 import akka.NotUsed;
 import akka.actor.AbstractActor;
+import akka.actor.ActorRef;
 import akka.actor.Props;
 import akka.event.Logging;
 import akka.event.LoggingAdapter;
@@ -69,6 +70,7 @@ public class IotCameraVASupervisor extends AbstractActor {
 	private int cameraId;
 	private Mat frame;
 	private boolean video_debug;
+	private ActorRef tracker;
 
 	// stream
 	private final Materializer materializer = ActorMaterializer.create(this.getContext());
@@ -95,8 +97,8 @@ public class IotCameraVASupervisor extends AbstractActor {
 	private int minimum_blob_width; // boundingbox
 	private int minimum_blob_height; // boundingbox
 	private double minimum_blob_area; // contour
-	
-	//In and out counting area should be submatrixes of roi
+
+	// In and out counting area should be submatrixes of roi
 	private Rect in_zone, out_zone, crossing_zone;
 
 	// for debug purposes we would like to create a window
@@ -130,7 +132,7 @@ public class IotCameraVASupervisor extends AbstractActor {
 		this.minimum_blob_height = 50;
 		this.minimum_blob_width = 50;
 		this.in_zone = new Rect(roi_rectangle.x, roi_rectangle.y, 30, roi_rectangle.height);
-		this.out_zone = new Rect(roi_rectangle.x+roi_rectangle.width-30,roi_rectangle.y, 30, roi_rectangle.height);
+		this.out_zone = new Rect(roi_rectangle.x + roi_rectangle.width - 30, roi_rectangle.y, 30, roi_rectangle.height);
 
 		// stream
 		// Akka stream Source that pushes frames according to back
@@ -199,10 +201,13 @@ public class IotCameraVASupervisor extends AbstractActor {
 						blobs.add(b);
 					}
 				}
+				
+				tracker.tell(new UpdateTracking(blobs), this.getSelf());
 
 				return blobs;
 			}));
-
+			
+			
 			/*
 			 * final FanInShape2<List<MatOfPoint>, Mat, Mat> zip = builder
 			 * .add(ZipWith.create((List<MatOfPoint> left, Mat right) -> { int
@@ -215,7 +220,7 @@ public class IotCameraVASupervisor extends AbstractActor {
 			 * return right; }));
 			 */
 
-			final FanInShape2<List<Blob>, Mat, Mat> zipr = builder.add(ZipWith.create((List<Blob> left, Mat right) -> {
+			final FanInShape2<List<Blob>, Mat, Mat> zip_draw = builder.add(ZipWith.create((List<Blob> left, Mat right) -> {
 				for (Blob b : left) {
 					Rect r = b.getBoundingBox();
 					Imgproc.rectangle(right, new Point(r.x, r.y), new Point(r.x + r.width, r.y + r.height),
@@ -226,20 +231,18 @@ public class IotCameraVASupervisor extends AbstractActor {
 				Imgproc.rectangle(right, new Point(roi_rectangle.x, roi_rectangle.y),
 						new Point(roi_rectangle.x + roi_rectangle.width, roi_rectangle.y + roi_rectangle.height),
 						new Scalar(255, 255, 0));
-				//draw areas
+				// draw areas
 				Imgproc.rectangle(right, new Point(in_zone.x, in_zone.y),
-						new Point(in_zone.x + in_zone.width, in_zone.y + in_zone.height),
-						new Scalar(0, 255, 0));
+						new Point(in_zone.x + in_zone.width, in_zone.y + in_zone.height), new Scalar(0, 255, 0));
 				Imgproc.rectangle(right, new Point(out_zone.x, out_zone.y),
-						new Point(out_zone.x + out_zone.width, out_zone.y + out_zone.height),
-						new Scalar(0, 0, 255));
+						new Point(out_zone.x + out_zone.width, out_zone.y + out_zone.height), new Scalar(0, 0, 255));
 				return right;
 			}));
 
-			builder.from(A).toInlet(zipr.in1());
-			builder.from(A).via(mask).via(bgs).via(imgproc).via(find_contours).via(find_blobs).toInlet(zipr.in0());
+			builder.from(A).toInlet(zip_draw.in1());
+			builder.from(A).via(mask).via(bgs).via(imgproc).via(find_contours).via(find_blobs).toInlet(zip_draw.in0());
 
-			return new FlowShape<Mat, Mat>(A.in(), zipr.out());
+			return new FlowShape<Mat, Mat>(A.in(), zip_draw.out());
 
 		});
 
@@ -271,6 +274,8 @@ public class IotCameraVASupervisor extends AbstractActor {
 			this.window.setVisible(true);
 			this.window.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
 		}
+		this.tracker = this.getContext().actorOf(TrackerActor.props(in_zone, out_zone), "Tracker");
+		
 		// this.capture.open(cameraId);
 		this.capture.open("res/videoplayback.mp4");
 		this.frame_history_passed = 0;
@@ -295,6 +300,7 @@ public class IotCameraVASupervisor extends AbstractActor {
 			this.cameraActive = false;
 
 		}
+		this.getContext().stop(tracker);
 
 	}
 
