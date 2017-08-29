@@ -18,6 +18,8 @@ public class Blob {
 	private int id;
 	private boolean alive;
 	private int weight; // how many people the blob contains
+	private boolean evaluate; // flag that tells if the blob is relevant for
+								// counting
 
 	public Blob(MatOfPoint points) {
 		this.p = points;
@@ -28,6 +30,7 @@ public class Blob {
 		int cy = (int) (M.m01 / M.m00);
 		this.centroid = new Point(cx, cy);
 		this.alive = true;
+		this.evaluate = false;
 	}
 
 	public Blob(MatOfPoint points, Rect box) {
@@ -75,6 +78,21 @@ public class Blob {
 		this.alive = false;
 	}
 
+	public void setEvaluate(boolean f) {
+		this.evaluate = f;
+	}
+
+	public boolean evaluate() {
+		return evaluate;
+	}
+
+	public void update(Blob b) {
+		this.p = b.getContours();
+		this.area = b.getArea();
+		this.centroid = b.getCentroid();
+		this.boundingBox = b.getBoundingBox();
+		this.weight = b.weight;
+	}
 
 	private Rect computeBoundingBox(MatOfPoint points) {
 		MatOfPoint2f approxCurve = new MatOfPoint2f();

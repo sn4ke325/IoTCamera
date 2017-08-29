@@ -100,6 +100,11 @@ public class IotCameraVASupervisor extends AbstractActor {
 
 	// In and out counting area should be submatrixes of roi
 	private Rect in_zone, out_zone, crossing_zone;
+	// crossing line approach
+	private boolean vertical, flip_scene; // flags to understand the orientation
+											// of in/out and scene
+	private double crossing_line; // coord of vertical or horizontal line to
+									// split the scene
 
 	// for debug purposes we would like to create a window
 	private JFrame window;
@@ -120,7 +125,7 @@ public class IotCameraVASupervisor extends AbstractActor {
 		// default parameters
 		this.usemask = true;
 		this.roi_rectangle = new Rect(0, 100, 480, 180);
-		this.frame_history_length = 120;
+		this.frame_history_length = 30;
 		this.mog2 = Video.createBackgroundSubtractorMOG2();
 		this.mog2.setDetectShadows(false);
 		this.mog2.setHistory(frame_history_length);
@@ -129,10 +134,13 @@ public class IotCameraVASupervisor extends AbstractActor {
 		this.erosion_size = 5;
 		this.blur_size = 5;
 		this.minimum_blob_area = 20;
-		this.minimum_blob_height = 50;
-		this.minimum_blob_width = 50;
+		this.minimum_blob_height = 80;
+		this.minimum_blob_width = 80;
 		this.in_zone = new Rect(roi_rectangle.x, roi_rectangle.y, 30, roi_rectangle.height);
 		this.out_zone = new Rect(roi_rectangle.x + roi_rectangle.width - 30, roi_rectangle.y, 30, roi_rectangle.height);
+		this.crossing_line = 250;
+		this.vertical = true;
+		this.flip_scene = false;
 
 		// stream
 		// Akka stream Source that pushes frames according to back
@@ -201,13 +209,12 @@ public class IotCameraVASupervisor extends AbstractActor {
 						blobs.add(b);
 					}
 				}
-				
+
 				tracker.tell(new UpdateTracking(blobs), this.getSelf());
 
 				return blobs;
 			}));
-			
-			
+
 			/*
 			 * final FanInShape2<List<MatOfPoint>, Mat, Mat> zip = builder
 			 * .add(ZipWith.create((List<MatOfPoint> left, Mat right) -> { int
@@ -220,24 +227,38 @@ public class IotCameraVASupervisor extends AbstractActor {
 			 * return right; }));
 			 */
 
-			final FanInShape2<List<Blob>, Mat, Mat> zip_draw = builder.add(ZipWith.create((List<Blob> left, Mat right) -> {
-				for (Blob b : left) {
-					Rect r = b.getBoundingBox();
-					Imgproc.rectangle(right, new Point(r.x, r.y), new Point(r.x + r.width, r.y + r.height),
-							new Scalar(255, 0, 0));
-					Imgproc.circle(right, b.getCentroid(), 2, new Scalar(255, 0, 0));
-				}
-				// draws unmasked area
-				Imgproc.rectangle(right, new Point(roi_rectangle.x, roi_rectangle.y),
-						new Point(roi_rectangle.x + roi_rectangle.width, roi_rectangle.y + roi_rectangle.height),
-						new Scalar(255, 255, 0));
-				// draw areas
-				Imgproc.rectangle(right, new Point(in_zone.x, in_zone.y),
-						new Point(in_zone.x + in_zone.width, in_zone.y + in_zone.height), new Scalar(0, 255, 0));
-				Imgproc.rectangle(right, new Point(out_zone.x, out_zone.y),
-						new Point(out_zone.x + out_zone.width, out_zone.y + out_zone.height), new Scalar(0, 0, 255));
-				return right;
-			}));
+			final FanInShape2<List<Blob>, Mat, Mat> zip_draw = builder
+					.add(ZipWith.create((List<Blob> left, Mat right) -> {
+						for (Blob b : left) {
+							Rect r = b.getBoundingBox();
+							Imgproc.rectangle(right, new Point(r.x, r.y), new Point(r.x + r.width, r.y + r.height),
+									new Scalar(255, 0, 0));
+							Imgproc.circle(right, b.getCentroid(), 2, new Scalar(255, 0, 0));
+						}
+						// draws unmasked area
+						Imgproc.rectangle(right, new Point(roi_rectangle.x, roi_rectangle.y),
+								new Point(roi_rectangle.x + roi_rectangle.width,
+										roi_rectangle.y + roi_rectangle.height),
+								new Scalar(255, 255, 0));
+						// draw areas
+						/*
+						 * Imgproc.rectangle(right, new Point(in_zone.x,
+						 * in_zone.y), new Point(in_zone.x + in_zone.width,
+						 * in_zone.y + in_zone.height), new Scalar(0, 255, 0));
+						 * Imgproc.rectangle(right, new Point(out_zone.x,
+						 * out_zone.y), new Point(out_zone.x + out_zone.width,
+						 * out_zone.y + out_zone.height), new Scalar(0, 0,
+						 * 255));
+						 */
+						// draw crossing line
+						if (vertical)
+							Imgproc.line(right, new Point(crossing_line, 0), new Point(crossing_line, right.height()),
+									new Scalar(0, 0, 255));
+						else
+							Imgproc.line(right, new Point(0, crossing_line), new Point(right.width(), crossing_line),
+									new Scalar(0, 0, 255));
+						return right;
+					}));
 
 			builder.from(A).toInlet(zip_draw.in1());
 			builder.from(A).via(mask).via(bgs).via(imgproc).via(find_contours).via(find_blobs).toInlet(zip_draw.in0());
@@ -274,8 +295,9 @@ public class IotCameraVASupervisor extends AbstractActor {
 			this.window.setVisible(true);
 			this.window.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
 		}
-		this.tracker = this.getContext().actorOf(TrackerActor.props(in_zone, out_zone), "Tracker");
-		
+
+		this.tracker = this.getContext().actorOf(TrackerActor.props(crossing_line, vertical, flip_scene), "Tracker");
+
 		// this.capture.open(cameraId);
 		this.capture.open("res/videoplayback.mp4");
 		this.frame_history_passed = 0;
