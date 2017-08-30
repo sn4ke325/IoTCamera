@@ -70,7 +70,7 @@ public class IotCameraVASupervisor extends AbstractActor {
 	private int cameraId;
 	private Mat frame;
 	private boolean video_debug;
-	private ActorRef tracker;
+	private ActorRef tracker, counter;
 
 	// stream
 	private final Materializer materializer = ActorMaterializer.create(this.getContext());
@@ -120,6 +120,7 @@ public class IotCameraVASupervisor extends AbstractActor {
 	}
 
 	public void preStart() {
+		this.counter = this.getContext().actorOf(CounterActor.props(), "Counter-Actor");
 		this.cameraActive = false;
 		this.capture = new VideoCapture();
 		// default parameters
@@ -266,10 +267,12 @@ public class IotCameraVASupervisor extends AbstractActor {
 			return new FlowShape<Mat, Mat>(A.in(), zip_draw.out());
 
 		});
-
+		if(this.video_debug)
 		this.stream = frameSource.throttle(33, FiniteDuration.create(1, TimeUnit.SECONDS), 1, ThrottleMode.shaping())
 				.via(this.videoAnalysisPartialGraph).viaMat(KillSwitches.single(), Keep.right())
 				.toMat(Sink.foreach(f -> showFrame(f, lbl)), Keep.left());
+		else this.stream = frameSource.throttle(33, FiniteDuration.create(1, TimeUnit.SECONDS), 1, ThrottleMode.shaping())
+				.via(this.videoAnalysisPartialGraph).viaMat(KillSwitches.single(), Keep.right()).to(Sink.ignore());
 
 		// for debug purposes we create a window to watch the video
 		/*
@@ -296,7 +299,7 @@ public class IotCameraVASupervisor extends AbstractActor {
 			this.window.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
 		}
 
-		this.tracker = this.getContext().actorOf(TrackerActor.props(crossing_line, vertical, flip_scene), "Tracker");
+		this.tracker = this.getContext().actorOf(TrackerActor.props(crossing_line, vertical, flip_scene, counter), "Tracker-Actor");
 
 		// this.capture.open(cameraId);
 		this.capture.open("res/videoplayback.mp4");

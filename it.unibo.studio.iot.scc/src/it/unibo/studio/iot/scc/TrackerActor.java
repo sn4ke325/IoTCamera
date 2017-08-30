@@ -10,15 +10,17 @@ import org.opencv.core.Point;
 import org.opencv.core.Rect;
 
 import akka.actor.AbstractActor;
+import akka.actor.ActorRef;
 import akka.actor.Props;
 import akka.event.Logging;
 import akka.event.LoggingAdapter;
+import it.unibo.studio.iot.scc.messages.Count;
 import it.unibo.studio.iot.scc.messages.UpdateTracking;
 
 public class TrackerActor extends AbstractActor {
 
 	private final LoggingAdapter log = Logging.getLogger(getContext().getSystem(), this);
-
+	private ActorRef counterActor;
 	private Rect in_zone, out_zone;
 	private double crossing_coord;
 	private boolean vertical, flipped;
@@ -39,10 +41,11 @@ public class TrackerActor extends AbstractActor {
 														// them if they
 														// eventually split
 
-	public TrackerActor(double c, boolean v, boolean f) {
+	public TrackerActor(double c, boolean v, boolean f, ActorRef actor) {
 		this.crossing_coord = c;
 		this.vertical = v;
 		this.flipped = f;
+		this.counterActor = actor;
 	}
 
 	public void preStart() {
@@ -55,8 +58,8 @@ public class TrackerActor extends AbstractActor {
 										// neighbors when matching blobs
 	}
 
-	public static Props props(double c, boolean v, boolean f) {
-		return Props.create(TrackerActor.class, c, v, f);
+	public static Props props(double c, boolean v, boolean f, ActorRef a) {
+		return Props.create(TrackerActor.class, c, v, f, a);
 	}
 
 	@Override
@@ -173,13 +176,13 @@ public class TrackerActor extends AbstractActor {
 									count = b.weight(); // blob is entering
 							}
 						}
-						log.info("Blob with ID " + Integer.toString(b.id()) + " has left the scene. Counting "
-								+ Integer.toString(count));
+
 					}
 
 					if (count != 0) {
-						// send message to counterActor to count
-						// TODO
+						log.info("Blob with ID " + Integer.toString(b.id()) + " has left the scene. Counting "
+								+ Integer.toString(count));
+						counterActor.tell(new Count(count), this.self());
 					}
 
 				}
