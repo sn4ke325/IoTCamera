@@ -144,13 +144,23 @@ public class IotCameraVASupervisor extends AbstractActor {
 		this.flip_scene = false;
 
 		// stream
-		// Akka stream Source that pushes frames according to back
-		// pressure
-		this.frameSource = Source.fromGraph(new CameraFrameSource(capture));
+		// source that generates 33 frames per second from camera or video input
+		this.frameSource = Source.fromGraph(new CameraFrameSource(capture)).throttle(33,
+				FiniteDuration.create(1, TimeUnit.SECONDS), 1, ThrottleMode.shaping());
+
+		// video analysis flow
 
 		// partial akka stream graph that does the video analysis
 		this.videoAnalysisPartialGraph = GraphDSL.create(builder -> {
-			final UniformFanOutShape<Mat, Mat> A = builder.add(Broadcast.create(2));
+			final UniformFanOutShape<Mat, Mat> splitA = builder.add(Broadcast.create(2));
+
+			final FlowShape<Mat, Mat> RGBtoHSV = builder.add(Flow.of(Mat.class).map(f -> {
+				Mat dst = new Mat();
+				Imgproc.cvtColor(f, dst, Imgproc.COLOR_BGR2HSV);
+				return dst;
+			}));
+			
+			final UniformFanOutShape<Mat, Mat> splitB = builder.add(Broadcast.create(2));
 
 			final FlowShape<Mat, Mat> mask = builder.add(Flow.of(Mat.class).map(f -> {
 				if (usemask) {
@@ -261,27 +271,19 @@ public class IotCameraVASupervisor extends AbstractActor {
 						return right;
 					}));
 
-			builder.from(A).toInlet(zip_draw.in1());
-			builder.from(A).via(mask).via(bgs).via(imgproc).via(find_contours).via(find_blobs).toInlet(zip_draw.in0());
+			builder.from(splitA).toInlet(zip_draw.in1()); //sends untouched frame to the end of the stream
+			builder.from(splitA).toInlet(splitB.in());
+			builder.from(splitB).via(mask).via(bgs).via(imgproc).via(find_contours).via(find_blobs).toInlet(zip_draw.in0());
 
-			return new FlowShape<Mat, Mat>(A.in(), zip_draw.out());
+			return new FlowShape<Mat, Mat>(splitA.in(), zip_draw.out());
 
 		});
-		if(this.video_debug)
-		this.stream = frameSource.throttle(33, FiniteDuration.create(1, TimeUnit.SECONDS), 1, ThrottleMode.shaping())
-				.via(this.videoAnalysisPartialGraph).viaMat(KillSwitches.single(), Keep.right())
-				.toMat(Sink.foreach(f -> showFrame(f, lbl)), Keep.left());
-		else this.stream = frameSource.throttle(33, FiniteDuration.create(1, TimeUnit.SECONDS), 1, ThrottleMode.shaping())
-				.via(this.videoAnalysisPartialGraph).viaMat(KillSwitches.single(), Keep.right()).to(Sink.ignore());
-
-		// for debug purposes we create a window to watch the video
-		/*
-		 * this.window = new JFrame(); this.window.setLayout(new FlowLayout());
-		 * this.window.setSize(1280, 720); this.lbl = new JLabel(); this.lbl1 =
-		 * new JLabel(); this.window.add(lbl); this.window.add(lbl1);
-		 * this.window.setVisible(true);
-		 * this.window.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
-		 */
+		if (this.video_debug)
+			this.stream = frameSource.via(this.videoAnalysisPartialGraph).viaMat(KillSwitches.single(), Keep.right())
+					.toMat(Sink.foreach(f -> showFrame(f, lbl)), Keep.left());
+		else
+			this.stream = frameSource.via(this.videoAnalysisPartialGraph).viaMat(KillSwitches.single(), Keep.right())
+					.to(Sink.ignore());
 
 	}
 
@@ -299,7 +301,8 @@ public class IotCameraVASupervisor extends AbstractActor {
 			this.window.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
 		}
 
-		this.tracker = this.getContext().actorOf(TrackerActor.props(crossing_line, vertical, flip_scene, counter), "Tracker-Actor");
+		this.tracker = this.getContext().actorOf(TrackerActor.props(crossing_line, vertical, flip_scene, counter),
+				"Tracker-Actor");
 
 		// this.capture.open(cameraId);
 		this.capture.open("res/videoplayback.mp4");
