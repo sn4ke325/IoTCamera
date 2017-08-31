@@ -35,6 +35,8 @@ import akka.event.LoggingAdapter;
 import akka.stream.ActorMaterializer;
 import akka.stream.Attributes;
 import akka.stream.FanInShape2;
+import akka.stream.FanOutShape;
+import akka.stream.FanOutShape2;
 import akka.stream.FlowShape;
 import akka.stream.Graph;
 import akka.stream.Inlet;
@@ -52,6 +54,8 @@ import akka.stream.javadsl.Keep;
 import akka.stream.javadsl.RunnableGraph;
 import akka.stream.javadsl.Sink;
 import akka.stream.javadsl.Source;
+import akka.stream.javadsl.Unzip;
+import akka.stream.javadsl.UnzipWith;
 import akka.stream.javadsl.ZipWith;
 import akka.stream.stage.AbstractInHandler;
 import akka.stream.stage.AbstractOutHandler;
@@ -159,8 +163,53 @@ public class IotCameraVASupervisor extends AbstractActor {
 				Imgproc.cvtColor(f, dst, Imgproc.COLOR_BGR2HSV);
 				return dst;
 			}));
-			
+
 			final UniformFanOutShape<Mat, Mat> splitB = builder.add(Broadcast.create(2));
+			final UniformFanOutShape<Mat, Mat> splitC = builder.add(Broadcast.create(2));
+
+			final FlowShape<Mat, Mat> img_processing = builder.add(Flow.fromFunction(f -> {
+				//f stays unprocessed
+				Mat processed_frame = f.clone();
+				Mat blurred_image = new Mat();
+				// highlight region of interest
+				if (usemask)
+					processed_frame = mask(f, roi_rectangle);
+				//apply some blur to remove noise before bgs
+				Imgproc.blur(processed_frame, blurred_image, new Size(2 * blur_size + 1, 2 * blur_size + 1));
+				// background subtraction
+				Mat fgmask = subtractBackground(blurred_image);
+				//morphological operations
+				Mat temp = new Mat();
+				Mat dst = new Mat();
+				Imgproc.threshold(fgmask, temp, threshold_value, 255, Imgproc.THRESH_BINARY);
+				Imgproc.blur(temp, blurred_image, new Size(2 * blur_size + 1, 2 * blur_size + 1));
+				
+				//dilate with large element, erode with small one
+				Mat elementD = Imgproc.getStructuringElement(Imgproc.MORPH_RECT,
+						new Size(2 * dilation_size + 1, 2 * dilation_size + 1));
+				Mat elementE = Imgproc.getStructuringElement(Imgproc.MORPH_RECT,
+						new Size(2 * erosion_size + 1, 2 * erosion_size + 1));
+				
+				Imgproc.erode(blurred_image, dst, elementE);
+				Imgproc.erode(dst, temp, elementE);
+				
+				Imgproc.dilate(temp, dst, elementD);
+				Imgproc.dilate(dst, temp, elementD);
+				
+				Imgproc.GaussianBlur(temp, blurred_image, new Size(2 * blur_size + 1, 2 * blur_size + 1), 2 * blur_size);
+				Imgproc.threshold(blurred_image, temp, 50, 255, Imgproc.THRESH_BINARY);
+				Imgproc.erode(temp, dst, elementE);
+				
+				//mask the original image with fgmask
+				f.copyTo(processed_frame, dst);
+				
+				
+				//returns processed fgmask for contours finding
+
+				return dst;
+			}));
+			
+			final FanOutShape2<Pair<Mat, Mat>, Mat, Mat> unzip = builder.add(Unzip.create(Mat.class,Mat.class));
 
 			final FlowShape<Mat, Mat> mask = builder.add(Flow.of(Mat.class).map(f -> {
 				if (usemask) {
@@ -271,9 +320,12 @@ public class IotCameraVASupervisor extends AbstractActor {
 						return right;
 					}));
 
-			builder.from(splitA).toInlet(zip_draw.in1()); //sends untouched frame to the end of the stream
+			builder.from(splitA).toInlet(zip_draw.in1()); // sends untouched
+															// frame to the end
+															// of the stream
 			builder.from(splitA).toInlet(splitB.in());
-			builder.from(splitB).via(mask).via(bgs).via(imgproc).via(find_contours).via(find_blobs).toInlet(zip_draw.in0());
+			builder.from(splitB).via(mask).via(bgs).via(imgproc).via(find_contours).via(find_blobs)
+					.toInlet(zip_draw.in0());
 
 			return new FlowShape<Mat, Mat>(splitA.in(), zip_draw.out());
 
