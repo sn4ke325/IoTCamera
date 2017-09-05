@@ -1,3 +1,7 @@
 Started Logging: 2017-08-30 18:22:47.591
 2017-08-30 18:22:47.591 1 left.
 2017-08-30 18:22:47.591 1 left.
+Started Logging: 2017-09-05 16:37:54.069
+Stopped Logging: 2017-09-05 16:37:54.069
+Started Logging: 2017-09-05 17:02:54.919
+Stopped Logging: 2017-09-05 17:02:54.919
