@@ -133,7 +133,6 @@ public class IotCameraVASupervisor extends AbstractActor {
 		this.roi_rectangle = new Rect(0, 100, 480, 180);
 		this.frame_history_length = 60;
 		this.mog2 = Video.createBackgroundSubtractorMOG2();
-		//this.mog2.setDetectShadows(false);
 		this.mog2.setHistory(frame_history_length);
 		this.threshold_value = 127;
 		this.dilation_size = 7;
@@ -159,19 +158,17 @@ public class IotCameraVASupervisor extends AbstractActor {
 		this.videoAnalysisPartialGraph = GraphDSL.create(builder -> {
 			final UniformFanOutShape<Mat, Mat> splitA = builder.add(Broadcast.create(3));
 
-
 			final UniformFanOutShape<Mat, Mat> splitC = builder.add(Broadcast.create(2));
 
 			final FlowShape<Mat, Mat> img_processing = builder.add(Flow.fromFunction(f -> {
-				
-				
+
 				// f stays unprocessed
-				Mat processed_frame =  new Mat();
+				Mat processed_frame = new Mat();
 				Mat blurred_image = new Mat();
-				
-				//transform to grayscale
-				Imgproc.cvtColor(f, processed_frame,Imgproc.COLOR_BGR2GRAY );
-				
+
+				// transform to grayscale
+				Imgproc.cvtColor(f, processed_frame, Imgproc.COLOR_BGR2GRAY);
+
 				// highlight region of interest
 				if (usemask)
 					processed_frame = mask(processed_frame, roi_rectangle);
@@ -179,17 +176,16 @@ public class IotCameraVASupervisor extends AbstractActor {
 				Imgproc.blur(processed_frame, blurred_image, new Size(2 * blur_size + 1, 2 * blur_size + 1));
 				// background subtraction
 				Mat fgmask = subtractBackground(processed_frame);
-				
-				
+
 				// morphological operations
 				Mat temp = new Mat();
 				Mat dst = new Mat();
 				Imgproc.threshold(fgmask, temp, threshold_value, 255, Imgproc.THRESH_BINARY);
-				
+
 				Imgproc.blur(temp, blurred_image, new Size(2 * blur_size + 1, 2 * blur_size + 1));
 				Imgproc.threshold(blurred_image, temp, threshold_value, 255, Imgproc.THRESH_BINARY);
-				
-				//ok until here
+
+				// ok until here
 
 				// dilate with large element, erode with small one
 				Mat elementD = Imgproc.getStructuringElement(Imgproc.MORPH_RECT,
@@ -201,22 +197,16 @@ public class IotCameraVASupervisor extends AbstractActor {
 				Imgproc.dilate(dst, temp, elementD);
 				Imgproc.erode(temp, dst, elementE);
 				Imgproc.dilate(dst, temp, elementD);
-				
-				
-				
 
 				Imgproc.GaussianBlur(temp, blurred_image, new Size(2 * blur_size + 1, 2 * blur_size + 1),
 						2 * blur_size);
-				
-				
+
 				Imgproc.threshold(blurred_image, temp, 50, 255, Imgproc.THRESH_BINARY);
 				Imgproc.erode(temp, dst, elementE);
-				
+
 				if (this.video_debug)
-					 this.showFrame(dst, lbl1);
-				
-				 
-				
+					this.showFrame(dst, lbl1);
+
 				// mask the original image with fgmask
 				// f.copyTo(processed_frame, dst);
 
@@ -232,7 +222,7 @@ public class IotCameraVASupervisor extends AbstractActor {
 
 			final FlowShape<Tuple3<Mat, Mat, List<Blob>>, List<Blob>> color_segment = builder
 					.add(Flow.fromFunction(t -> {
-						Mat dst = new Mat();				
+						Mat dst = new Mat();
 						Imgproc.cvtColor(t.first(), dst, Imgproc.COLOR_BGR2HSV);
 						return t.third();
 					}));
@@ -268,7 +258,7 @@ public class IotCameraVASupervisor extends AbstractActor {
 			final FanInShape2<List<Blob>, Mat, Mat> zip_draw = builder
 					.add(ZipWith.create((List<Blob> left, Mat right) -> {
 						for (Blob b : left) {
-							
+
 							Rect r = b.getBoundingBox();
 							Imgproc.rectangle(right, new Point(r.x, r.y), new Point(r.x + r.width, r.y + r.height),
 									new Scalar(255, 0, 0));
@@ -305,13 +295,10 @@ public class IotCameraVASupervisor extends AbstractActor {
 															// of the stream
 			builder.from(splitA).toInlet(img_processing.in());
 			builder.from(splitA).toInlet(zip3.in0());
-			//builder.from(RGBtoHSV).toFanOut(splitB);
-			//builder.from(splitB).toInlet(img_processing.in());
 			builder.from(img_processing).toFanOut(splitC);
 			builder.from(splitC).toInlet(find_contours.in());
 			builder.from(find_contours).via(find_blobs).toInlet(zip3.in2());
 			builder.from(splitC).toInlet(zip3.in1());
-			//builder.from(splitB).toInlet(zip3.in0());
 			builder.from(zip3.out()).toInlet(color_segment.in());
 			builder.from(color_segment.out()).toInlet(zip_draw.in0());
 
@@ -342,7 +329,7 @@ public class IotCameraVASupervisor extends AbstractActor {
 		this.tracker = this.getContext().actorOf(TrackerActor.props(crossing_line, vertical, flip_scene, counter),
 				"Tracker-Actor");
 
-		//this.capture.open(cameraId);
+		// this.capture.open(cameraId);
 		this.capture.open("res/videoplayback.mp4");
 		this.frame_history_passed = 0;
 		if (capture.isOpened()) {
