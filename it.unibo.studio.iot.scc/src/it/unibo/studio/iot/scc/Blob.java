@@ -1,6 +1,7 @@
 package it.unibo.studio.iot.scc;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import org.opencv.core.MatOfPoint;
@@ -47,10 +48,14 @@ public class Blob {
 
 	public void addHSVData(List<double[]> l) {
 		this.HSV_data = l;
-		//find color vector for this data
-		//use Value instead of Hue if saturation levels are next to 0
-		
-		
+		// find color vector for this data
+		// use Value instead of Hue if saturation levels are next to 0
+		// todo
+
+	}
+
+	public double[] getCV() {
+		return color_vector;
 	}
 
 	public MatOfPoint getContours() {
@@ -103,6 +108,33 @@ public class Blob {
 		this.centroid = b.getCentroid();
 		this.boundingBox = b.getBoundingBox();
 		this.weight = b.weight;
+	}
+
+	private int[] findMaxIndexVector(double[] v, int n) {
+		double[] max = new double[n];
+		int[] n_top = new int[n];
+		Arrays.fill(max, -1);
+		Arrays.fill(n_top, -1);
+		for (int i = 0; i < n; i++) {
+			if (i == 0) {
+				// find absolute max and put it in max[0]
+				for (int j = 0; j < v.length; j++) {
+					if (v[j] > max[i]) {
+						max[i] = v[j];
+						n_top[i] = j;
+					}
+				}
+			} else {
+				for (int j = 0; j < v.length; j++) {
+					if (v[j] > max[i] && v[j] < max[i - 1]) {
+						max[i] = v[j];
+						n_top[i] = j;
+					}
+				}
+			}
+		}
+
+		return n_top;
 	}
 
 	private Rect computeBoundingBox(MatOfPoint points) {
