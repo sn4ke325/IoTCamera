@@ -20,6 +20,8 @@ public class Blob {
 	private int weight; // how many people the blob contains
 	private boolean evaluate; // flag that tells if the blob is relevant for
 								// counting
+	private List<double[]> HSV_data;
+	private double[] color_vector;
 
 	public Blob(MatOfPoint points) {
 		this.p = points;
@@ -31,6 +33,7 @@ public class Blob {
 		this.centroid = new Point(cx, cy);
 		this.alive = true;
 		this.evaluate = false;
+		this.color_vector = new double[3];
 	}
 
 	public Blob(MatOfPoint points, Rect box) {
@@ -40,6 +43,14 @@ public class Blob {
 
 	public void setID(int id) {
 		this.id = id;
+	}
+
+	public void addHSVData(List<double[]> l) {
+		this.HSV_data = l;
+		//find color vector for this data
+		//use Value instead of Hue if saturation levels are next to 0
+		
+		
 	}
 
 	public MatOfPoint getContours() {

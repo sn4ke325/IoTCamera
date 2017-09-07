@@ -13,8 +13,11 @@ import javax.swing.ImageIcon;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 
+import org.opencv.core.Core;
 import org.opencv.core.CvType;
 import org.opencv.core.Mat;
+import org.opencv.core.MatOfFloat;
+import org.opencv.core.MatOfInt;
 import org.opencv.core.MatOfPoint;
 import org.opencv.core.MatOfPoint2f;
 import org.opencv.core.Point;
@@ -102,6 +105,7 @@ public class IotCameraVASupervisor extends AbstractActor {
 	private int minimum_blob_width; // boundingbox
 	private int minimum_blob_height; // boundingbox
 	private double minimum_blob_area; // contour
+	private int hist_bins;
 
 	// In and out counting area should be submatrixes of roi
 	private Rect in_zone, out_zone, crossing_zone;
@@ -146,6 +150,7 @@ public class IotCameraVASupervisor extends AbstractActor {
 		this.crossing_line = 250;
 		this.vertical = true;
 		this.flip_scene = false;
+		this.hist_bins = 60;
 
 		// stream
 		// source that generates 33 frames per second from camera or video input
@@ -204,9 +209,6 @@ public class IotCameraVASupervisor extends AbstractActor {
 				Imgproc.threshold(blurred_image, temp, 50, 255, Imgproc.THRESH_BINARY);
 				Imgproc.erode(temp, dst, elementE);
 
-				if (this.video_debug)
-					this.showFrame(dst, lbl1);
-
 				// mask the original image with fgmask
 				// f.copyTo(processed_frame, dst);
 
@@ -222,8 +224,86 @@ public class IotCameraVASupervisor extends AbstractActor {
 
 			final FlowShape<Tuple3<Mat, Mat, List<Blob>>, List<Blob>> color_segment = builder
 					.add(Flow.fromFunction(t -> {
+						// first is rgb untouched frame
+						// second is morphed fgmask
+						// third is list of blobs found with contours
+						// the idea is to combine fgmask - blobs contours -
+						// colour to get better info on the blob weight
+
+						// transform RGB frame into HSV frame
 						Mat dst = new Mat();
 						Imgproc.cvtColor(t.first(), dst, Imgproc.COLOR_BGR2HSV);
+						Mat masked = new Mat();
+						dst.copyTo(masked, t.second());
+
+						// build a histogram with the number of pixels for each
+						// hue value
+						for (Blob b : t.third()) {
+							// create a mask that isolate the blob, blob becomes
+							// ROI
+							// compute histogram of that region
+							// pick significant values to id the blob by color
+							Mat zeromask = Mat.zeros(t.first().size(), CvType.CV_8U);
+							List<MatOfPoint> list = new ArrayList<>();
+							list.add(b.getContours());
+							Imgproc.fillPoly(zeromask, list, new Scalar(255));
+
+							// split H, S and V planes in 3 different Mat
+							List<Mat> hsv_planes = new ArrayList<Mat>();
+							Core.split(dst, hsv_planes);
+							List<Mat> hist_input = new ArrayList<Mat>();
+							hist_input.add(hsv_planes.get(0));
+							MatOfInt channels = new MatOfInt(0);
+							int hbins = 180;
+							int svbins = 256;
+							MatOfInt histSize = new MatOfInt(hbins);
+							MatOfFloat ranges = new MatOfFloat(0f, 180f);
+							Mat h_hist = new Mat();
+							Imgproc.calcHist(hist_input, channels, zeromask, h_hist, histSize, ranges, false);
+
+							histSize = new MatOfInt(svbins);
+							ranges = new MatOfFloat(0f, 256f);
+							hist_input.clear();
+							hist_input.add(hsv_planes.get(1));
+							Mat s_hist = new Mat();
+							Imgproc.calcHist(hist_input, channels, zeromask, s_hist, histSize, ranges, false);
+							hist_input.clear();
+							hist_input.add(hsv_planes.get(2));
+							Mat v_hist = new Mat();
+							Imgproc.calcHist(hist_input, channels, zeromask, v_hist, histSize, ranges, false);
+							// put results into 3 arrays and add them to a list
+							double[] hue = new double[hbins];
+							double[] saturation = new double[svbins];
+							double[] value = new double[svbins];
+							List<double[]> HSV_data = new ArrayList<double[]>();
+							for (int i = 0; i < h_hist.rows(); i++)
+								hue[i] = h_hist.get(i, 0)[0];
+							HSV_data.add(hue);
+							for (int i = 0; i < s_hist.rows(); i++)
+								saturation[i] = s_hist.get(i, 0)[0];
+							HSV_data.add(saturation);
+							for (int i = 0; i < v_hist.rows(); i++)
+								value[i] = v_hist.get(i, 0)[0];
+							HSV_data.add(value);
+
+							/*for (double d : hue)
+								System.out.print(d + " ");
+							System.out.print("\n");*/
+
+							// pass the list to the blob
+
+							// System.out.println(h_hist.get(0, 0).length);
+							/*
+							 * System.out.println("Hrows: " + h_hist.rows() +
+							 * " Srows: " + s_hist.rows() + " Vrows: " +
+							 * v_hist.rows());
+							 */
+
+						}
+
+						if (this.video_debug)
+							this.showFrame(masked, lbl1);
+
 						return t.third();
 					}));
 
