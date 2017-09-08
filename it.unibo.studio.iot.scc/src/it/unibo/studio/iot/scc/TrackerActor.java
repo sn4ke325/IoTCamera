@@ -22,13 +22,13 @@ public class TrackerActor extends AbstractActor {
 	private final LoggingAdapter log = Logging.getLogger(getContext().getSystem(), this);
 	private ActorRef counterActor;
 	private Rect in_zone, out_zone;
-	private double crossing_coord;
+	private double crossing_coord_in;// crossed[0]
+	private double crossing_coord_out;// crossed[1]
 	private boolean vertical, flipped;
 	private int counter;
 	private double max_distance_radius;
 	private int best_candidate;
 	private double best_candidate_distance;
-	private Vector closest_speed_delta;
 	private Map<Integer, List<Point>> pos_history; // tracks the history of
 													// positions for each ID
 	private Map<Integer, Blob> alive_blobs; // map that holds the blobs in the
@@ -40,9 +40,14 @@ public class TrackerActor extends AbstractActor {
 														// bigger ones to track
 														// them if they
 														// eventually split
+	private Map<Integer, boolean[]> crossed;
 
-	public TrackerActor(double c, boolean v, boolean f, ActorRef actor) {
-		this.crossing_coord = c;
+	// quantization of hue and value
+	private int q_hue, q_value;
+
+	public TrackerActor(double i, double o, boolean v, boolean f, ActorRef actor) {
+		this.crossing_coord_in = i;
+		this.crossing_coord_out = o;
 		this.vertical = v;
 		this.flipped = f;
 		this.counterActor = actor;
@@ -54,12 +59,18 @@ public class TrackerActor extends AbstractActor {
 		this.alive_blobs = new HashMap<Integer, Blob>();
 		this.updated_blobs = new HashMap<Integer, Boolean>();
 		this.merged_blobs = new HashMap<Integer, List<Integer>>();
+		this.crossed = new HashMap<Integer, boolean[]>();
 		this.max_distance_radius = 25; // radius in which to find nearest
 										// neighbors when matching blobs
+
+		// quantization of hue and value
+		// these values should be decided by the user depending on the camera
+		this.q_hue = 5;
+		this.q_value = 16;
 	}
 
-	public static Props props(double c, boolean v, boolean f, ActorRef a) {
-		return Props.create(TrackerActor.class, c, v, f, a);
+	public static Props props(double i, double o, boolean v, boolean f, ActorRef a) {
+		return Props.create(TrackerActor.class, i, o, v, f, a);
 	}
 
 	@Override
@@ -72,11 +83,30 @@ public class TrackerActor extends AbstractActor {
 
 			if (alive_blobs.isEmpty()) {
 				for (Blob b : r.getBlobs()) {
-					b.setID(generateID());
-					pos_history.put(b.id(), new ArrayList<Point>());
-					pos_history.get(b.id()).add(b.getCentroid());
-					alive_blobs.put(b.id(), b);
-					updated_blobs.put(b.id(), true);
+					// if the blob is in the tracking area add it to the alive
+					// list
+					// find which baseline it did cross using distance
+					if (this.inTrackingArea(b.getCentroid())) {
+						// blob list is empty so we fill it with the blobs that
+						// crossed one of the baselines
+
+						// generate id for this blob
+						b.setID(generateID());
+						// create the list for position history
+						pos_history.put(b.id(), new ArrayList<Point>());
+						// add first position
+						pos_history.get(b.id()).add(b.getCentroid());
+						// add the blob to the alive(tracked) list
+						alive_blobs.put(b.id(), b);
+						// add an entry for the crossed map
+						this.crossed.put(b.id(), new boolean[2]);
+						// find closer baseline
+						// and set true to index 0 if IN is closer than OUT,
+						// true on index 1 on the opposite
+						this.crossed.get(b.id())[this.closestBaseline(b.getCentroid())] = true;
+
+						// updated_blobs.put(b.id(), true);
+					}
 
 				}
 			} else {
@@ -192,6 +222,29 @@ public class TrackerActor extends AbstractActor {
 			// ArrayList<Blob>(alive_blobs.values())), this.getSelf());
 
 		}).build();
+	}
+
+	private int closestBaseline(Point p) {
+		// returns 0 if IN is closest, else 1
+		if (vertical) {
+			if (distance(p, new Point(crossing_coord_in, p.y)) < distance(p, new Point(crossing_coord_out, p.y)))
+				return 0;
+			return 1;
+
+		} else {
+			if (distance(p, new Point(crossing_coord_in, p.x)) < distance(p, new Point(crossing_coord_out, p.x)))
+				return 0;
+			return 1;
+
+		}
+	}
+
+	private boolean inTrackingArea(Point p) {
+		if (vertical)
+			return p.x >= this.crossing_coord_in && p.x <= this.crossing_coord_out;
+
+		return p.y >= this.crossing_coord_in && p.y <= this.crossing_coord_out;
+
 	}
 
 	private int generateID() {

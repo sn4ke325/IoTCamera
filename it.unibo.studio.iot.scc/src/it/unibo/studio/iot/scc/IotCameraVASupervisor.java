@@ -112,8 +112,9 @@ public class IotCameraVASupervisor extends AbstractActor {
 	// crossing line approach
 	private boolean vertical, flip_scene; // flags to understand the orientation
 											// of in/out and scene
-	private double crossing_line; // coord of vertical or horizontal line to
-									// split the scene
+	private double crossing_line_in, crossing_line_out; // coord of vertical or
+														// horizontal line to
+	// split the scene
 
 	// for debug purposes we would like to create a window
 	private JFrame window;
@@ -143,12 +144,13 @@ public class IotCameraVASupervisor extends AbstractActor {
 		this.erosion_size = 2;
 		this.blur_size = 5;
 		this.minimum_blob_area = 20;
-		this.minimum_blob_height = 80;
-		this.minimum_blob_width = 80;
+		this.minimum_blob_height = 50;
+		this.minimum_blob_width = 50;
 		this.in_zone = new Rect(roi_rectangle.x, roi_rectangle.y, 30, roi_rectangle.height);
 		this.out_zone = new Rect(roi_rectangle.x + roi_rectangle.width - 30, roi_rectangle.y, 30, roi_rectangle.height);
-		this.crossing_line = 250;
-		this.vertical = true;
+		this.crossing_line_in = 100;
+		this.crossing_line_out = 380;
+		this.vertical = true;//people cross the scene horizonally, so baselines are vertical
 		this.flip_scene = false;
 		this.hist_bins = 60;
 
@@ -221,10 +223,9 @@ public class IotCameraVASupervisor extends AbstractActor {
 
 			final FlowShape<Pair<Mat, List<Blob>>, List<Blob>> color_segment = builder.add(Flow.fromFunction(p -> {
 				// first is rgb untouched frame
-				// second is morphed fgmask
-				// third is list of blobs found with contours
-				// the idea is to combine fgmask - blobs contours -
-				// colour to get better info on the blob weight
+				// second is list of blobs found with contours
+				// the idea is to combine blobs contours -
+				// colour to get better info on the blob
 
 				// transform RGB frame into HSV frame
 				Mat dst = new Mat();
@@ -236,7 +237,6 @@ public class IotCameraVASupervisor extends AbstractActor {
 					// create a mask that isolate the blob, blob becomes
 					// ROI
 					// compute histogram of that region
-					// pick significant values to id the blob by color
 					Mat zeromask = Mat.zeros(p.first().size(), CvType.CV_8U);
 					List<MatOfPoint> list = new ArrayList<>();
 					list.add(b.getContours());
@@ -292,6 +292,8 @@ public class IotCameraVASupervisor extends AbstractActor {
 				/*
 				 * if (this.video_debug) this.showFrame(masked, lbl1);
 				 */
+				// tell tracker
+				// tracker.tell(new UpdateTracking(p.second()), this.getSelf());
 
 				return p.second();
 			}));
@@ -318,8 +320,6 @@ public class IotCameraVASupervisor extends AbstractActor {
 						blobs.add(b);
 					}
 				}
-
-				// tracker.tell(new UpdateTracking(blobs), this.getSelf());
 
 				return blobs;
 			}));
@@ -349,12 +349,17 @@ public class IotCameraVASupervisor extends AbstractActor {
 						 * 255));
 						 */
 						// draw crossing line
-						if (vertical)
-							Imgproc.line(right, new Point(crossing_line, 0), new Point(crossing_line, right.height()),
-									new Scalar(0, 0, 255));
-						else
-							Imgproc.line(right, new Point(0, crossing_line), new Point(right.width(), crossing_line),
-									new Scalar(0, 0, 255));
+						if (vertical) {
+							Imgproc.line(right, new Point(crossing_line_in, 0),
+									new Point(crossing_line_in, right.height()), new Scalar(0, 0, 255));
+							Imgproc.line(right, new Point(crossing_line_out, 0),
+									new Point(crossing_line_out, right.height()), new Scalar(0, 0, 255));
+						} else {
+							Imgproc.line(right, new Point(0, crossing_line_in),
+									new Point(right.width(), crossing_line_in), new Scalar(0, 0, 255));
+							Imgproc.line(right, new Point(0, crossing_line_out),
+									new Point(right.width(), crossing_line_out), new Scalar(0, 0, 255));
+						}
 
 						return right;
 					}));
@@ -391,8 +396,7 @@ public class IotCameraVASupervisor extends AbstractActor {
 			this.stream = frameSource.via(this.videoAnalysisPartialGraph).viaMat(KillSwitches.single(), Keep.right())
 					.to(Sink.ignore());
 
-		this.tracker = this.getContext().actorOf(TrackerActor.props(crossing_line, vertical, flip_scene, counter),
-				"Tracker-Actor");
+		//this.tracker = this.getContext().actorOf(TrackerActor.props(crossing_line_in, crossing_line_out, vertical, flip_scene, counter),"Tracker-Actor");
 
 		// this.capture.open(cameraId);
 		this.capture.open("res/videoplayback.mp4");
