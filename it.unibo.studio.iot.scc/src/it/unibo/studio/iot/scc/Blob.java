@@ -22,7 +22,7 @@ public class Blob {
 	private boolean evaluate; // flag that tells if the blob is relevant for
 								// counting
 	private List<double[]> HSV_data;
-	private double[] color_vector;
+	private int[] color_vector;
 
 	public Blob(MatOfPoint points) {
 		this.p = points;
@@ -34,7 +34,6 @@ public class Blob {
 		this.centroid = new Point(cx, cy);
 		this.alive = true;
 		this.evaluate = false;
-		this.color_vector = new double[3];
 	}
 
 	public Blob(MatOfPoint points, Rect box) {
@@ -47,14 +46,33 @@ public class Blob {
 	}
 
 	public void addHSVData(List<double[]> l) {
+		// 0 - hue
+		// 1 - saturation
+		// 2 - value
 		this.HSV_data = l;
-		// find color vector for this data
-		// use Value instead of Hue if saturation levels are next to 0
-		// todo
+		double perc = 0;
+		double partial = 0;
+		double total = 0;
+		// find the perc of pixels that have saturation under 30
+		for (int i = 0; i < HSV_data.get(1).length; i++) {
+			total += HSV_data.get(1)[i];
+			if (i < 20)
+				partial += HSV_data.get(1)[i];
+
+		}
+		perc = (partial / total);
+
+		if (perc > 0.75) {
+			// use Value
+			this.color_vector = this.findMaxIndexVector(HSV_data.get(2), 3);
+		} else {
+			// use Hue
+			this.color_vector = this.findMaxIndexVector(HSV_data.get(0), 3);
+		}
 
 	}
 
-	public double[] getCV() {
+	public int[] getCV() {
 		return color_vector;
 	}
 
