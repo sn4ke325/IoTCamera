@@ -163,8 +163,6 @@ public class IotCameraVASupervisor extends AbstractActor {
 		this.videoAnalysisPartialGraph = GraphDSL.create(builder -> {
 			final UniformFanOutShape<Mat, Mat> splitA = builder.add(Broadcast.create(3));
 
-			final UniformFanOutShape<Mat, Mat> splitC = builder.add(Broadcast.create(2));
-
 			final FlowShape<Mat, Mat> img_processing = builder.add(Flow.fromFunction(f -> {
 
 				// f stays unprocessed
@@ -217,95 +215,86 @@ public class IotCameraVASupervisor extends AbstractActor {
 				return dst;
 			}));
 
-			final FanInShape3<Mat, Mat, List<Blob>, Tuple3<Mat, Mat, List<Blob>>> zip3 = builder
-					.add(ZipWith.create3((m1, m2, l) -> {
-						return new Tuple3<Mat, Mat, List<Blob>>(m1, m2, l);
-					}));
+			final FanInShape2<Mat, List<Blob>, Pair<Mat, List<Blob>>> zip = builder.add(ZipWith.create((m, l) -> {
+				return new Pair<Mat, List<Blob>>(m, l);
+			}));
 
-			final FlowShape<Tuple3<Mat, Mat, List<Blob>>, List<Blob>> color_segment = builder
-					.add(Flow.fromFunction(t -> {
-						// first is rgb untouched frame
-						// second is morphed fgmask
-						// third is list of blobs found with contours
-						// the idea is to combine fgmask - blobs contours -
-						// colour to get better info on the blob weight
+			final FlowShape<Pair<Mat, List<Blob>>, List<Blob>> color_segment = builder.add(Flow.fromFunction(p -> {
+				// first is rgb untouched frame
+				// second is morphed fgmask
+				// third is list of blobs found with contours
+				// the idea is to combine fgmask - blobs contours -
+				// colour to get better info on the blob weight
 
-						// transform RGB frame into HSV frame
-						Mat dst = new Mat();
-						Imgproc.cvtColor(t.first(), dst, Imgproc.COLOR_BGR2HSV);
-						Mat masked = new Mat();
-						dst.copyTo(masked, t.second());
+				// transform RGB frame into HSV frame
+				Mat dst = new Mat();
+				Imgproc.cvtColor(p.first(), dst, Imgproc.COLOR_BGR2HSV);
 
-						// build a histogram with the number of pixels for each
-						// hue value
-						for (Blob b : t.third()) {
-							// create a mask that isolate the blob, blob becomes
-							// ROI
-							// compute histogram of that region
-							// pick significant values to id the blob by color
-							Mat zeromask = Mat.zeros(t.first().size(), CvType.CV_8U);
-							List<MatOfPoint> list = new ArrayList<>();
-							list.add(b.getContours());
-							Imgproc.fillPoly(zeromask, list, new Scalar(255));
+				// build a histogram with the number of pixels for each
+				// hue value
+				for (Blob b : p.second()) {
+					// create a mask that isolate the blob, blob becomes
+					// ROI
+					// compute histogram of that region
+					// pick significant values to id the blob by color
+					Mat zeromask = Mat.zeros(p.first().size(), CvType.CV_8U);
+					List<MatOfPoint> list = new ArrayList<>();
+					list.add(b.getContours());
+					Imgproc.fillPoly(zeromask, list, new Scalar(255));
 
-							// split H, S and V planes in 3 different Mat
-							List<Mat> hsv_planes = new ArrayList<Mat>();
-							Core.split(dst, hsv_planes);
-							List<Mat> hist_input = new ArrayList<Mat>();
-							hist_input.add(hsv_planes.get(0));
-							MatOfInt channels = new MatOfInt(0);
-							int hbins = 180;
-							int svbins = 256;
-							MatOfInt histSize = new MatOfInt(hbins);
-							MatOfFloat ranges = new MatOfFloat(0f, 180f);
-							Mat h_hist = new Mat();
-							Imgproc.calcHist(hist_input, channels, zeromask, h_hist, histSize, ranges, false);
+					// split H, S and V planes in 3 different Mat
+					List<Mat> hsv_planes = new ArrayList<Mat>();
+					Core.split(dst, hsv_planes);
+					List<Mat> hist_input = new ArrayList<Mat>();
+					hist_input.add(hsv_planes.get(0));
+					MatOfInt channels = new MatOfInt(0);
+					int hbins = 180;
+					int svbins = 256;
+					MatOfInt histSize = new MatOfInt(hbins);
+					MatOfFloat ranges = new MatOfFloat(0f, 180f);
+					Mat h_hist = new Mat();
+					Imgproc.calcHist(hist_input, channels, zeromask, h_hist, histSize, ranges, false);
 
-							histSize = new MatOfInt(svbins);
-							ranges = new MatOfFloat(0f, 256f);
-							hist_input.clear();
-							hist_input.add(hsv_planes.get(1));
-							Mat s_hist = new Mat();
-							Imgproc.calcHist(hist_input, channels, zeromask, s_hist, histSize, ranges, false);
-							hist_input.clear();
-							hist_input.add(hsv_planes.get(2));
-							Mat v_hist = new Mat();
-							Imgproc.calcHist(hist_input, channels, zeromask, v_hist, histSize, ranges, false);
-							// put results into 3 arrays and add them to a list
-							double[] hue = new double[hbins];
-							double[] saturation = new double[svbins];
-							double[] value = new double[svbins];
-							List<double[]> HSV_data = new ArrayList<double[]>();
-							for (int i = 0; i < h_hist.rows(); i++)
-								hue[i] = h_hist.get(i, 0)[0];
-							HSV_data.add(hue);
-							for (int i = 0; i < s_hist.rows(); i++)
-								saturation[i] = s_hist.get(i, 0)[0];
-							HSV_data.add(saturation);
-							for (int i = 0; i < v_hist.rows(); i++)
-								value[i] = v_hist.get(i, 0)[0];
-							HSV_data.add(value);
+					histSize = new MatOfInt(svbins);
+					ranges = new MatOfFloat(0f, 256f);
+					hist_input.clear();
+					hist_input.add(hsv_planes.get(1));
+					Mat s_hist = new Mat();
+					Imgproc.calcHist(hist_input, channels, zeromask, s_hist, histSize, ranges, false);
+					hist_input.clear();
+					hist_input.add(hsv_planes.get(2));
+					Mat v_hist = new Mat();
+					Imgproc.calcHist(hist_input, channels, zeromask, v_hist, histSize, ranges, false);
+					// put results into 3 arrays and add them to a list
+					double[] hue = new double[hbins];
+					double[] saturation = new double[svbins];
+					double[] value = new double[svbins];
+					List<double[]> HSV_data = new ArrayList<double[]>();
+					for (int i = 0; i < h_hist.rows(); i++)
+						hue[i] = h_hist.get(i, 0)[0];
+					HSV_data.add(hue);
+					for (int i = 0; i < s_hist.rows(); i++)
+						saturation[i] = s_hist.get(i, 0)[0];
+					HSV_data.add(saturation);
+					for (int i = 0; i < v_hist.rows(); i++)
+						value[i] = v_hist.get(i, 0)[0];
+					HSV_data.add(value);
+					// pass the list to the blob
 
-							/*for (double d : hue)
-								System.out.print(d + " ");
-							System.out.print("\n");*/
+					b.addHSVData(HSV_data);
 
-							// pass the list to the blob
+					// at this point the blob detected contains its contours,
+					// with also centroid/bounding box position, and the HSV
+					// values to help with tracking
 
-							// System.out.println(h_hist.get(0, 0).length);
-							/*
-							 * System.out.println("Hrows: " + h_hist.rows() +
-							 * " Srows: " + s_hist.rows() + " Vrows: " +
-							 * v_hist.rows());
-							 */
+				}
 
-						}
+				/*
+				 * if (this.video_debug) this.showFrame(masked, lbl1);
+				 */
 
-						if (this.video_debug)
-							this.showFrame(masked, lbl1);
-
-						return t.third();
-					}));
+				return p.second();
+			}));
 
 			final FlowShape<Mat, List<MatOfPoint>> find_contours = builder.add(Flow.of(Mat.class).map(src -> {
 				List<MatOfPoint> contours = new ArrayList<MatOfPoint>();
@@ -374,13 +363,9 @@ public class IotCameraVASupervisor extends AbstractActor {
 															// frame to the end
 															// of the stream
 			builder.from(splitA).toInlet(img_processing.in());
-			builder.from(splitA).toInlet(zip3.in0());
-			builder.from(img_processing).toFanOut(splitC);
-			builder.from(splitC).toInlet(find_contours.in());
-			builder.from(find_contours).via(find_blobs).toInlet(zip3.in2());
-			builder.from(splitC).toInlet(zip3.in1());
-			builder.from(zip3.out()).toInlet(color_segment.in());
-			builder.from(color_segment.out()).toInlet(zip_draw.in0());
+			builder.from(splitA).toInlet(zip.in0());
+			builder.from(img_processing).via(find_contours).via(find_blobs).toInlet(zip.in1());
+			builder.from(zip.out()).via(color_segment).toInlet(zip_draw.in0());
 
 			return new FlowShape<Mat, Mat>(splitA.in(), zip_draw.out());
 
