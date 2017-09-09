@@ -1,6 +1,7 @@
 package it.unibo.studio.iot.scc;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -27,8 +28,8 @@ public class TrackerActor extends AbstractActor {
 	private boolean vertical, flipped;
 	private int counter;
 	private double max_distance_radius;
-	private int best_candidate;
-	private double best_candidate_distance;
+	// private int best_candidate;
+	// private double best_candidate_distance;
 	private Map<Integer, List<Point>> pos_history; // tracks the history of
 													// positions for each ID
 	private Map<Integer, Blob> alive_blobs; // map that holds the blobs in the
@@ -109,12 +110,66 @@ public class TrackerActor extends AbstractActor {
 					}
 
 				}
-			} else {
-				for (Blob b : r.getBlobs()) {
-					// match the blob with one in the previous frame in order to
-					// track it
-					track(b);
-				}
+			} else {// there are blobs in the tracked zone already being tracked
+				alive_blobs.forEach((id, blob) -> {
+					// controllo se esistono blob nel nuovo frame con centroide
+					// vicino
+					int best_candidate = -1;
+					double best_candidate_distance = 100000;
+
+					// find the closest blob in the previous frame within a
+					// certain radius
+					// from b
+					for (int i = 0; i < r.getBlobs().size(); i++) {
+						double CB = distance(r.getBlobs().get(i).getCentroid(), blob.getCentroid());
+						if (CB <= max_distance_radius && CB < best_candidate_distance) {
+							best_candidate = i;
+							best_candidate_distance = CB;
+						}
+
+					}
+
+					// if no candidate was found check using color vectors
+					if (best_candidate == -1) {
+						// make a list of possible candidates (for when people
+						// wear the same colors)
+						List<Integer> candidates = new ArrayList<Integer>();
+						for (int i = 0; i < r.getBlobs().size(); i++) {
+							if (Arrays.equals(blob.getCV(), r.getBlobs().get(i).getCV()))
+								candidates.add(i);
+						}
+
+						// if something is found
+						if (candidates.size() > 0) {
+							// find the closest one
+							for (int i = 0; i < r.getBlobs().size(); i++) {
+								double CB = distance(r.getBlobs().get(candidates.get(i)).getCentroid(),
+										blob.getCentroid());
+								if (CB < best_candidate_distance) {
+									best_candidate = i;
+									best_candidate_distance = CB;
+								}
+
+							}
+							// update the alive blob and remove from the new
+							// blob list
+
+						}
+
+					}
+
+					if (best_candidate != -1) {
+						Blob candidate = r.getBlobs().remove(best_candidate);
+						blob.update(candidate);
+						pos_history.get(blob.id()).add(candidate.getCentroid());
+					}
+
+				});
+
+				/*
+				 * for (Blob b : r.getBlobs()) { // match the blob with one in
+				 * the previous frame in order to // track it track(b); }
+				 */
 			}
 
 			// check if blobs have crossed the line
