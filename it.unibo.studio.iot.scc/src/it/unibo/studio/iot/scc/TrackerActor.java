@@ -6,6 +6,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.Stack;
 
 import org.opencv.core.Point;
 import org.opencv.core.Rect;
@@ -25,7 +26,8 @@ public class TrackerActor extends AbstractActor {
 	private Rect in_zone, out_zone;
 	private double crossing_coord_in;// crossed[0]
 	private double crossing_coord_out;// crossed[1]
-	private boolean vertical, flipped;
+	private boolean vertical;
+	private int flipped;
 	private int counter;
 	private double max_distance_radius;
 	// private int best_candidate;
@@ -46,7 +48,7 @@ public class TrackerActor extends AbstractActor {
 	// quantization of hue and value
 	private int q_hue, q_value;
 
-	public TrackerActor(double i, double o, boolean v, boolean f, ActorRef actor) {
+	public TrackerActor(double i, double o, boolean v, int f, ActorRef actor) {
 		this.crossing_coord_in = i;
 		this.crossing_coord_out = o;
 		this.vertical = v;
@@ -70,7 +72,7 @@ public class TrackerActor extends AbstractActor {
 		this.q_value = 16;
 	}
 
-	public static Props props(double i, double o, boolean v, boolean f, ActorRef a) {
+	public static Props props(double i, double o, boolean v, int f, ActorRef a) {
 		return Props.create(TrackerActor.class, i, o, v, f, a);
 	}
 
@@ -110,7 +112,20 @@ public class TrackerActor extends AbstractActor {
 						// wear the same colors)
 						List<Integer> candidates = new ArrayList<Integer>();
 						for (int i = 0; i < r.getBlobs().size(); i++) {
-							if (Arrays.equals(blob.getCV(), r.getBlobs().get(i).getCV()))
+							int[] alive_blobCV = new int[blob.getCV().length];
+							int[] new_blobCV = new int[blob.getCV().length];
+							for (int j = 0; j < blob.getCV().length; j++) {
+								if (blob.usesHUEVector())
+									alive_blobCV[j] = blob.getCV()[j] / this.q_hue;
+								else
+									alive_blobCV[j] = blob.getCV()[j] / this.q_value;
+								if (r.getBlobs().get(i).usesHUEVector())
+									new_blobCV[j] = r.getBlobs().get(i).getCV()[j] / this.q_hue;
+								else
+									new_blobCV[j] = r.getBlobs().get(i).getCV()[j] / this.q_value;
+							}
+
+							if (Arrays.equals(alive_blobCV, new_blobCV))
 								candidates.add(i);
 						}
 
@@ -176,112 +191,49 @@ public class TrackerActor extends AbstractActor {
 
 			// now it's time to check if alive blobs have crossed another
 			// baseline and do the counting
-			
-			
+			Stack<Integer> deathrow = new Stack<Integer>();
+			alive_blobs.forEach((id, blob) -> {
+				if (!inTrackingArea(blob.getCentroid())) {
+					deathrow.push(id);
+					if (crossed.get(id)[closestBaseline(blob.getCentroid())]) {
+						// blob is going back => don't count and delete
+						log.info("Blob with ID " + Integer.toString(blob.id())
+								+ " has left the scene going back to its origin. Not counting. ");
+					} else {
+						// blob is crossing the second baseline => count and
+						// delete
 
-			// check if blobs have crossed the line
-			alive_blobs.forEach((id, b) -> {
-				if (vertical) {// blobs cross horizontally
-					int history_size = this.pos_history.get(id).size();
-					if (history_size > 1) {
-						double last_pos = this.pos_history.get(id).get(history_size - 1).x;
-						double previous_pos = this.pos_history.get(id).get(history_size - 2).x;
-						double origin = this.pos_history.get(id).get(0).x;
-						if ((previous_pos > this.crossing_coord && last_pos <= this.crossing_coord)
-								&& origin > this.crossing_coord
-								|| (previous_pos < this.crossing_coord && last_pos >= this.crossing_coord
-										&& origin < this.crossing_coord)) {
-							// blob has crossed the line and needs to be counted
-							// when leaves the are
+						// call closest baseline
+						// if 0 the blob is entering the building
+						// else is leaving
+						if (closestBaseline(blob.getCentroid()) == 0) {
+							// count in
+							log.info("Blob with ID " + Integer.toString(blob.id()) + " has left the scene. Counting "
+									+ Integer.toString(blob.weight() * flipped));
+							this.counterActor.tell(new Count(blob.weight() * flipped), this.getSelf());
 
-							alive_blobs.get(id).setEvaluate(true);
-
-						} else if ((previous_pos > this.crossing_coord && last_pos <= this.crossing_coord)
-								&& origin < this.crossing_coord
-								|| (previous_pos < this.crossing_coord && last_pos >= this.crossing_coord
-										&& origin > this.crossing_coord)) {
-							// blob is going back to where it came from
-							alive_blobs.get(id).setEvaluate(false);
+						} else {
+							// count out
+							log.info("Blob with ID " + Integer.toString(blob.id()) + " has left the scene. Counting "
+									+ Integer.toString(-blob.weight() * flipped));
+							this.counterActor.tell(new Count(-blob.weight() * flipped), this.getSelf());
 						}
+						
 					}
+					
+					log.info("Current number of alive blobs: "
+							+ Integer.toString(alive_blobs.size() - deathrow.size()));
 
-				} else {// blobs cross vertically
-					int history_size = this.pos_history.get(id).size();
-					if (history_size > 1) {
-						double last_pos = this.pos_history.get(id).get(history_size - 1).y;
-						double previous_pos = this.pos_history.get(id).get(history_size - 2).y;
-						double origin = this.pos_history.get(id).get(0).y;
-						if ((previous_pos > this.crossing_coord && last_pos <= this.crossing_coord)
-								&& origin > this.crossing_coord
-								|| (previous_pos < this.crossing_coord && last_pos >= this.crossing_coord
-										&& origin < this.crossing_coord)) {
-							// blob has crossed the line and needs to be counted
-							// when leaves the are
-
-							alive_blobs.get(id).setEvaluate(true);
-
-						} else if ((previous_pos > this.crossing_coord && last_pos <= this.crossing_coord)
-								&& origin < this.crossing_coord
-								|| (previous_pos < this.crossing_coord && last_pos >= this.crossing_coord
-										&& origin > this.crossing_coord)) {
-							// blob is going back to where it came from
-							alive_blobs.get(id).setEvaluate(false);
-						}
-					}
 				}
 			});
 
-			// check if some blobs haven't been updated and clean them based on
-			// their position in the scene
-			Integer[] keys = new Integer[updated_blobs.keySet().size()];
-			updated_blobs.keySet().toArray(keys);
-			for (Integer id : keys) {
-				if (!updated_blobs.get(id)) {
-					int count = 0;
-					Blob b = alive_blobs.remove(id);
-					b.kill();
-					updated_blobs.remove(id);
-					pos_history.remove(id);
-					if (b.evaluate()) {
-						if (vertical) {
-							if (!flipped) {
-								if (b.getCentroid().x < this.crossing_coord)
-									count = b.weight(); // blob is entering
-								else
-									count = -b.weight(); // blob is leaving
-							} else {
-								if (b.getCentroid().x < this.crossing_coord)
-									count = -b.weight(); // blob is leaving
-								else
-									count = b.weight(); // blob is entering
-							}
-						} else {
-							if (!flipped) {
-								if (b.getCentroid().y < this.crossing_coord)
-									count = b.weight(); // blob is entering
-								else
-									count = -b.weight(); // blob is leaving
-							} else {
-								if (b.getCentroid().y < this.crossing_coord)
-									count = -b.weight(); // blob is leaving
-								else
-									count = b.weight(); // blob is entering
-							}
-						}
-
-					}
-
-					if (count != 0) {
-						log.info("Blob with ID " + Integer.toString(b.id()) + " has left the scene. Counting "
-								+ Integer.toString(count));
-						counterActor.tell(new Count(count), this.self());
-					}
-
-				}
+			// clear dead blobs
+			while (!deathrow.isEmpty()) {
+				int id = deathrow.pop();
+				alive_blobs.remove(id);
+				this.pos_history.remove(id);
+				this.crossed.remove(id);
 			}
-
-			// getSender().tell(new UpdateTracking(new
-			// ArrayList<Blob>(alive_blobs.values())), this.getSelf());
 
 		}).build();
 	}
@@ -316,44 +268,6 @@ public class TrackerActor extends AbstractActor {
 				counter = 0;
 		}
 		return counter;
-	}
-
-	private void track(Blob b) {
-		best_candidate = -1;
-		best_candidate_distance = 100000;
-
-		// find the closest blob in the previous frame within a certain radius
-		// from b
-		alive_blobs.forEach((id, c) -> {
-			double CB = distance(b.getCentroid(), c.getCentroid());
-			if (CB <= max_distance_radius && CB < best_candidate_distance) {
-				best_candidate = id;
-				best_candidate_distance = CB;
-			}
-
-		});
-		// if best candidate is not found then a new blob must have entered the
-		// scene and needs to be tracked
-		if (best_candidate == -1) {
-
-			// a new blob has entered the scene
-			// add it to the list of tracked blobs
-			b.setID(generateID());
-			pos_history.put(b.id(), new ArrayList<Point>());
-			pos_history.get(b.id()).add(b.getCentroid());
-			alive_blobs.put(b.id(), b);
-			updated_blobs.put(b.id(), true);
-
-		} else
-
-		{// a best candidate has been found, time to replace the previous
-			// frame's blob with the new one and update the tracking
-			b.setID(best_candidate);
-			alive_blobs.get(best_candidate).update(b);
-			pos_history.get(best_candidate).add(b.getCentroid());
-			updated_blobs.put(best_candidate, true);
-
-		}
 	}
 
 	private double distance(Point a, Point b) {

@@ -23,6 +23,7 @@ public class Blob {
 								// counting
 	private List<double[]> HSV_data;
 	private int[] color_vector;
+	private boolean hue_vector;
 
 	public Blob(MatOfPoint points) {
 		this.p = points;
@@ -65,15 +66,21 @@ public class Blob {
 		if (perc > 0.75) {
 			// use Value
 			this.color_vector = this.findMaxIndexVector(HSV_data.get(2), 3);
+			this.hue_vector=false;
 		} else {
 			// use Hue
 			this.color_vector = this.findMaxIndexVector(HSV_data.get(0), 3);
+			this.hue_vector=true;
 		}
 
 	}
 
 	public int[] getCV() {
 		return color_vector;
+	}
+	
+	public boolean usesHUEVector(){
+		return hue_vector;
 	}
 
 	public MatOfPoint getContours() {

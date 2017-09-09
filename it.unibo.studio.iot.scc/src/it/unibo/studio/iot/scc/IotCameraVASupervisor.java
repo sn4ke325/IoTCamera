@@ -110,7 +110,8 @@ public class IotCameraVASupervisor extends AbstractActor {
 	// In and out counting area should be submatrixes of roi
 	private Rect in_zone, out_zone, crossing_zone;
 	// crossing line approach
-	private boolean vertical, flip_scene; // flags to understand the orientation
+	private boolean vertical;
+	private int flip_scene; // flags to understand the orientation
 											// of in/out and scene
 	private double crossing_line_in, crossing_line_out; // coord of vertical or
 														// horizontal line to
@@ -151,7 +152,7 @@ public class IotCameraVASupervisor extends AbstractActor {
 		this.crossing_line_in = 100;
 		this.crossing_line_out = 380;
 		this.vertical = true;//people cross the scene horizonally, so baselines are vertical
-		this.flip_scene = false;
+		this.flip_scene = 1; //1 for In left/top, -1 for IN right/bottom
 		this.hist_bins = 60;
 
 		// stream
@@ -293,7 +294,7 @@ public class IotCameraVASupervisor extends AbstractActor {
 				 * if (this.video_debug) this.showFrame(masked, lbl1);
 				 */
 				// tell tracker
-				// tracker.tell(new UpdateTracking(p.second()), this.getSelf());
+				 tracker.tell(new UpdateTracking(p.second()), this.getSelf());
 
 				return p.second();
 			}));
@@ -396,7 +397,7 @@ public class IotCameraVASupervisor extends AbstractActor {
 			this.stream = frameSource.via(this.videoAnalysisPartialGraph).viaMat(KillSwitches.single(), Keep.right())
 					.to(Sink.ignore());
 
-		//this.tracker = this.getContext().actorOf(TrackerActor.props(crossing_line_in, crossing_line_out, vertical, flip_scene, counter),"Tracker-Actor");
+		this.tracker = this.getContext().actorOf(TrackerActor.props(crossing_line_in, crossing_line_out, vertical, flip_scene, counter),"Tracker-Actor");
 
 		// this.capture.open(cameraId);
 		this.capture.open("res/videoplayback.mp4");
