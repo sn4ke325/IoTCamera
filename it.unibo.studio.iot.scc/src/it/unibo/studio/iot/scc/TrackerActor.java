@@ -81,36 +81,11 @@ public class TrackerActor extends AbstractActor {
 			updated_blobs.forEach((id, updated) -> {
 				updated_blobs.replace(id, false);
 			});
-
-			if (alive_blobs.isEmpty()) {
-				for (Blob b : r.getBlobs()) {
-					// if the blob is in the tracking area add it to the alive
-					// list
-					// find which baseline it did cross using distance
-					if (this.inTrackingArea(b.getCentroid())) {
-						// blob list is empty so we fill it with the blobs that
-						// crossed one of the baselines
-
-						// generate id for this blob
-						b.setID(generateID());
-						// create the list for position history
-						pos_history.put(b.id(), new ArrayList<Point>());
-						// add first position
-						pos_history.get(b.id()).add(b.getCentroid());
-						// add the blob to the alive(tracked) list
-						alive_blobs.put(b.id(), b);
-						// add an entry for the crossed map
-						this.crossed.put(b.id(), new boolean[2]);
-						// find closer baseline
-						// and set true to index 0 if IN is closer than OUT,
-						// true on index 1 on the opposite
-						this.crossed.get(b.id())[this.closestBaseline(b.getCentroid())] = true;
-
-						// updated_blobs.put(b.id(), true);
-					}
-
-				}
-			} else {// there are blobs in the tracked zone already being tracked
+			// if some blobs are already being tracked
+			// try to associate new ones with old ones
+			// removing found ones from the "new" list
+			if (!alive_blobs.isEmpty()) {
+				// there are blobs in the tracked zone already being tracked
 				alive_blobs.forEach((id, blob) -> {
 					// controllo se esistono blob nel nuovo frame con centroide
 					// vicino
@@ -151,12 +126,12 @@ public class TrackerActor extends AbstractActor {
 								}
 
 							}
-							// update the alive blob and remove from the new
-							// blob list
-
 						}
 
 					}
+					// either by centroid or by color vector something has been
+					// found
+					// time to update the tracking
 
 					if (best_candidate != -1) {
 						Blob candidate = r.getBlobs().remove(best_candidate);
@@ -165,12 +140,44 @@ public class TrackerActor extends AbstractActor {
 					}
 
 				});
-
-				/*
-				 * for (Blob b : r.getBlobs()) { // match the blob with one in
-				 * the previous frame in order to // track it track(b); }
-				 */
 			}
+
+			// se sono rimaste delle blob nella lista che non sono state
+			// associate a quelle già presenti, devo decidere cosa farne
+			// se sono fuori dall'area di tracking le ignoro, se sono
+			// all'interno inizio a tracciarle come nuove blobs
+
+			for (Blob b : r.getBlobs()) {
+				// if the blob is in the tracking area add it to the alive
+				// list
+				// find which baseline it did cross using distance
+				if (this.inTrackingArea(b.getCentroid())) {
+					// blob list is empty so we fill it with the blobs that
+					// crossed one of the baselines
+
+					// generate id for this blob
+					b.setID(generateID());
+					// create the list for position history
+					pos_history.put(b.id(), new ArrayList<Point>());
+					// add first position
+					pos_history.get(b.id()).add(b.getCentroid());
+					// add the blob to the alive(tracked) list
+					alive_blobs.put(b.id(), b);
+					// add an entry for the crossed map
+					this.crossed.put(b.id(), new boolean[2]);
+					// find closer baseline
+					// and set true to index 0 if IN is closer than OUT,
+					// true on index 1 on the opposite
+					this.crossed.get(b.id())[this.closestBaseline(b.getCentroid())] = true;
+
+				}
+
+			}
+
+			// now it's time to check if alive blobs have crossed another
+			// baseline and do the counting
+			
+			
 
 			// check if blobs have crossed the line
 			alive_blobs.forEach((id, b) -> {
