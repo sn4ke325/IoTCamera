@@ -63,14 +63,14 @@ public class Blob {
 		}
 		perc = (partial / total);
 
-		if (perc > 0.75) {
+		if (perc > 0.9) {
 			// use Value
 			this.color_vector = this.findMaxIndexVector(HSV_data.get(2), 3);
-			this.hue_vector=false;
+			this.hue_vector = false;
 		} else {
 			// use Hue
 			this.color_vector = this.findMaxIndexVector(HSV_data.get(0), 3);
-			this.hue_vector=true;
+			this.hue_vector = true;
 		}
 
 	}
@@ -78,8 +78,8 @@ public class Blob {
 	public int[] getCV() {
 		return color_vector;
 	}
-	
-	public boolean usesHUEVector(){
+
+	public boolean usesHUEVector() {
 		return hue_vector;
 	}
 
@@ -92,7 +92,8 @@ public class Blob {
 	}
 
 	public Point getCentroid() {
-		return centroid;
+		// return centroid;
+		return new Point((2*boundingBox.x + boundingBox.width) / 2, (2*boundingBox.y + boundingBox.height) / 2);
 	}
 
 	public Rect getBoundingBox() {

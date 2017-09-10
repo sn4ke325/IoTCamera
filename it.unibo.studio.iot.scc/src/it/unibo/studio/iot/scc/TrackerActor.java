@@ -197,8 +197,7 @@ public class TrackerActor extends AbstractActor {
 					deathrow.push(id);
 					if (crossed.get(id)[closestBaseline(blob.getCentroid())]) {
 						// blob is going back => don't count and delete
-						log.info("Blob with ID " + Integer.toString(blob.id())
-								+ " has left the scene going back to its origin. Not counting. ");
+						//log.info("Blob with ID " + Integer.toString(blob.id())								+ " has left the scene going back to its origin. Not counting. ");
 					} else {
 						// blob is crossing the second baseline => count and
 						// delete
@@ -221,8 +220,7 @@ public class TrackerActor extends AbstractActor {
 						
 					}
 					
-					log.info("Current number of alive blobs: "
-							+ Integer.toString(alive_blobs.size() - deathrow.size()));
+					//log.info("Current number of alive blobs: "							+ Integer.toString(alive_blobs.size() - deathrow.size()));
 
 				}
 			});
