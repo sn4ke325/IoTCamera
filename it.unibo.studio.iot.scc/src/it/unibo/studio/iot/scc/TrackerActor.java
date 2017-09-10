@@ -43,6 +43,7 @@ public class TrackerActor extends AbstractActor {
 														// bigger ones to track
 														// them if they
 														// eventually split
+	private Map<Integer, TrackedItem> tracked;
 	private Map<Integer, boolean[]> crossed;
 
 	// quantization of hue and value
@@ -63,6 +64,7 @@ public class TrackerActor extends AbstractActor {
 		this.updated_blobs = new HashMap<Integer, Boolean>();
 		this.merged_blobs = new HashMap<Integer, List<Integer>>();
 		this.crossed = new HashMap<Integer, boolean[]>();
+		this.tracked = new HashMap<Integer, TrackedItem>();
 		this.max_distance_radius = 25; // radius in which to find nearest
 										// neighbors when matching blobs
 
@@ -80,15 +82,17 @@ public class TrackerActor extends AbstractActor {
 	public Receive createReceive() {
 		return receiveBuilder().match(UpdateTracking.class, r -> {
 
-			updated_blobs.forEach((id, updated) -> {
-				updated_blobs.replace(id, false);
-			});
+			/*
+			 * updated_blobs.forEach((id, updated) -> {
+			 * updated_blobs.replace(id, false); });
+			 */
+
 			// if some blobs are already being tracked
 			// try to associate new ones with old ones
 			// removing found ones from the "new" list
-			if (!alive_blobs.isEmpty()) {
+			if (!tracked.isEmpty()) {
 				// there are blobs in the tracked zone already being tracked
-				alive_blobs.forEach((id, blob) -> {
+				tracked.forEach((id, item) -> {
 					// controllo se esistono blob nel nuovo frame con centroide
 					// vicino
 					int best_candidate = -1;
@@ -98,7 +102,7 @@ public class TrackerActor extends AbstractActor {
 					// certain radius
 					// from b
 					for (int i = 0; i < r.getBlobs().size(); i++) {
-						double CB = distance(r.getBlobs().get(i).getCentroid(), blob.getCentroid());
+						double CB = distance(r.getBlobs().get(i).getCentroid(), item.getBlob().getCentroid());
 						if (CB <= max_distance_radius && CB < best_candidate_distance) {
 							best_candidate = i;
 							best_candidate_distance = CB;
@@ -112,13 +116,13 @@ public class TrackerActor extends AbstractActor {
 						// wear the same colors)
 						List<Integer> candidates = new ArrayList<Integer>();
 						for (int i = 0; i < r.getBlobs().size(); i++) {
-							int[] alive_blobCV = new int[blob.getCV().length];
-							int[] new_blobCV = new int[blob.getCV().length];
-							for (int j = 0; j < blob.getCV().length; j++) {
-								if (blob.usesHUEVector())
-									alive_blobCV[j] = blob.getCV()[j] / this.q_hue;
+							int[] alive_blobCV = new int[item.getBlob().getCV().length];
+							int[] new_blobCV = new int[item.getBlob().getCV().length];
+							for (int j = 0; j < item.getBlob().getCV().length; j++) {
+								if (item.getBlob().usesHUEVector())
+									alive_blobCV[j] = item.getBlob().getCV()[j] / this.q_hue;
 								else
-									alive_blobCV[j] = blob.getCV()[j] / this.q_value;
+									alive_blobCV[j] = item.getBlob().getCV()[j] / this.q_value;
 								if (r.getBlobs().get(i).usesHUEVector())
 									new_blobCV[j] = r.getBlobs().get(i).getCV()[j] / this.q_hue;
 								else
@@ -134,7 +138,7 @@ public class TrackerActor extends AbstractActor {
 							// find the closest one
 							for (int i = 0; i < r.getBlobs().size(); i++) {
 								double CB = distance(r.getBlobs().get(candidates.get(i)).getCentroid(),
-										blob.getCentroid());
+										item.getBlob().getCentroid());
 								if (CB < best_candidate_distance) {
 									best_candidate = i;
 									best_candidate_distance = CB;
@@ -150,8 +154,8 @@ public class TrackerActor extends AbstractActor {
 
 					if (best_candidate != -1) {
 						Blob candidate = r.getBlobs().remove(best_candidate);
-						blob.update(candidate);
-						pos_history.get(blob.id()).add(candidate.getCentroid());
+						item.updateBlob(candidate);
+						pos_history.get(item.getID()).add(candidate.getCentroid());
 					}
 
 				});
@@ -171,19 +175,20 @@ public class TrackerActor extends AbstractActor {
 					// crossed one of the baselines
 
 					// generate id for this blob
-					b.setID(generateID());
+					//b.setID(generateID());
+					int id = generateID();
 					// create the list for position history
-					pos_history.put(b.id(), new ArrayList<Point>());
+					pos_history.put(id, new ArrayList<Point>());
 					// add first position
-					pos_history.get(b.id()).add(b.getCentroid());
+					pos_history.get(id).add(b.getCentroid());
 					// add the blob to the alive(tracked) list
-					alive_blobs.put(b.id(), b);
+					tracked.put(id, new TrackedItem(b, id, this.closestBaseline(b.getCentroid())));
 					// add an entry for the crossed map
-					this.crossed.put(b.id(), new boolean[2]);
+					this.crossed.put(id, new boolean[2]);
 					// find closer baseline
 					// and set true to index 0 if IN is closer than OUT,
 					// true on index 1 on the opposite
-					this.crossed.get(b.id())[this.closestBaseline(b.getCentroid())] = true;
+					this.crossed.get(id)[this.closestBaseline(b.getCentroid())] = true;
 
 				}
 
@@ -192,12 +197,14 @@ public class TrackerActor extends AbstractActor {
 			// now it's time to check if alive blobs have crossed another
 			// baseline and do the counting
 			Stack<Integer> deathrow = new Stack<Integer>();
-			alive_blobs.forEach((id, blob) -> {
-				if (!inTrackingArea(blob.getCentroid())) {
+			tracked.forEach((id, item) -> {
+				if (!inTrackingArea(item.getBlob().getCentroid())) {
 					deathrow.push(id);
-					if (crossed.get(id)[closestBaseline(blob.getCentroid())]) {
+					if (crossed.get(id)[closestBaseline(item.getBlob().getCentroid())]) {
 						// blob is going back => don't count and delete
-						//log.info("Blob with ID " + Integer.toString(blob.id())								+ " has left the scene going back to its origin. Not counting. ");
+						// log.info("Blob with ID " +
+						// Integer.toString(blob.id()) + " has left the scene
+						// going back to its origin. Not counting. ");
 					} else {
 						// blob is crossing the second baseline => count and
 						// delete
@@ -205,22 +212,23 @@ public class TrackerActor extends AbstractActor {
 						// call closest baseline
 						// if 0 the blob is entering the building
 						// else is leaving
-						if (closestBaseline(blob.getCentroid()) == 0) {
+						if (closestBaseline(item.getBlob().getCentroid()) == 0) {
 							// count in
-							log.info("Blob with ID " + Integer.toString(blob.id()) + " has left the scene. Counting "
-									+ Integer.toString(blob.weight() * flipped));
-							this.counterActor.tell(new Count(blob.weight() * flipped), this.getSelf());
+							log.info("Blob with ID " + Integer.toString(item.getID()) + " has left the scene. Counting "
+									+ Integer.toString(item.getBlob().weight() * flipped));
+							this.counterActor.tell(new Count(item.getBlob().weight() * flipped), this.getSelf());
 
 						} else {
 							// count out
-							log.info("Blob with ID " + Integer.toString(blob.id()) + " has left the scene. Counting "
-									+ Integer.toString(-blob.weight() * flipped));
-							this.counterActor.tell(new Count(-blob.weight() * flipped), this.getSelf());
+							log.info("Blob with ID " + Integer.toString(item.getID()) + " has left the scene. Counting "
+									+ Integer.toString(-item.getBlob().weight() * flipped));
+							this.counterActor.tell(new Count(-item.getBlob().weight() * flipped), this.getSelf());
 						}
-						
+
 					}
-					
-					//log.info("Current number of alive blobs: "							+ Integer.toString(alive_blobs.size() - deathrow.size()));
+
+					// log.info("Current number of alive blobs: " +
+					// Integer.toString(alive_blobs.size() - deathrow.size()));
 
 				}
 			});
@@ -228,7 +236,7 @@ public class TrackerActor extends AbstractActor {
 			// clear dead blobs
 			while (!deathrow.isEmpty()) {
 				int id = deathrow.pop();
-				alive_blobs.remove(id);
+				tracked.remove(id);
 				this.pos_history.remove(id);
 				this.crossed.remove(id);
 			}
@@ -260,7 +268,7 @@ public class TrackerActor extends AbstractActor {
 	}
 
 	private int generateID() {
-		while (alive_blobs.containsKey(counter)) {
+		while (tracked.containsKey(counter)) {
 			counter++;
 			if (counter > 20)
 				counter = 0;
