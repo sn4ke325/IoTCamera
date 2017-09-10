@@ -10,6 +10,7 @@ public class TrackedItem {
 	private List<Point> position_history;
 	private int entering_baseline; // 0 for IN baseline, 1 otherwise
 	private int ID;
+	private int idle_since;
 
 	public TrackedItem(Blob b, int id, int bl) {
 		this.blob = b;
@@ -17,6 +18,7 @@ public class TrackedItem {
 		this.entering_baseline = bl;
 		this.position_history = new ArrayList<Point>();
 		this.position_history.add(blob.getCentroid());
+		this.idle_since = 0;
 	}
 
 	public Blob getBlob() {
@@ -26,6 +28,8 @@ public class TrackedItem {
 	public void updateBlob(Blob b) {
 		this.blob = b;
 		this.position_history.add(blob.getCentroid());
+		this.idle_since = 0;
+
 	}
 
 	public List<Point> getPosHistory() {
@@ -42,6 +46,12 @@ public class TrackedItem {
 
 	public int baseline() {
 		return entering_baseline;
+	}
+
+	public boolean isIdle() {
+		idle_since++;
+		return !(idle_since < 10);
+
 	}
 
 }

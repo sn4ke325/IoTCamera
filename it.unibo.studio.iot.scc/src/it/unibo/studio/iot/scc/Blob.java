@@ -23,7 +23,10 @@ public class Blob {
 								// counting
 	private List<double[]> HSV_data;
 	private int[] color_vector;
-	private boolean hue_vector;
+	private int[] hue_vector;
+	private int[] value_vector;
+	private boolean use_hueV;
+	private double low_saturation_perc;
 
 	public Blob(MatOfPoint points) {
 		this.p = points;
@@ -51,7 +54,6 @@ public class Blob {
 		// 1 - saturation
 		// 2 - value
 		this.HSV_data = l;
-		double perc = 0;
 		double partial = 0;
 		double total = 0;
 		// find the perc of pixels that have saturation under 30
@@ -61,26 +63,28 @@ public class Blob {
 				partial += HSV_data.get(1)[i];
 
 		}
-		perc = (partial / total);
+		this.low_saturation_perc = (partial / total);
 
-		if (perc > 0.9) {
-			// use Value
-			this.color_vector = this.findMaxIndexVector(HSV_data.get(2), 3);
-			this.hue_vector = false;
-		} else {
-			// use Hue
-			this.color_vector = this.findMaxIndexVector(HSV_data.get(0), 3);
-			this.hue_vector = true;
-		}
+		this.hue_vector = this.findMaxIndexVector(HSV_data.get(0), 3);
+		this.value_vector = this.findMaxIndexVector(HSV_data.get(2), 3);
+		this.use_hueV = this.low_saturation_perc < 0.8;
 
 	}
 
 	public int[] getCV() {
-		return color_vector;
+		return hue_vector;
 	}
 
 	public boolean usesHUEVector() {
-		return hue_vector;
+		return use_hueV;
+	}
+
+	public int[] getVV() {
+		return value_vector;
+	}
+
+	public double getLowSaturationPerc() {
+		return this.low_saturation_perc;
 	}
 
 	public MatOfPoint getContours() {
@@ -93,7 +97,7 @@ public class Blob {
 
 	public Point getCentroid() {
 		// return centroid;
-		return new Point((2*boundingBox.x + boundingBox.width) / 2, (2*boundingBox.y + boundingBox.height) / 2);
+		return new Point((2 * boundingBox.x + boundingBox.width) / 2, (2 * boundingBox.y + boundingBox.height) / 2);
 	}
 
 	public Rect getBoundingBox() {
