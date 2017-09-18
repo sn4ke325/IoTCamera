@@ -100,6 +100,7 @@ public class IotCameraVASupervisor extends AbstractActor {
 	private int erosion_size;
 	private int dilation_size;
 	private int blur_size;
+	
 
 	// blob weight and filtering
 	private int minimum_blob_width; // boundingbox
@@ -112,7 +113,7 @@ public class IotCameraVASupervisor extends AbstractActor {
 	// crossing line approach
 	private boolean vertical;
 	private int flip_scene; // flags to understand the orientation
-											// of in/out and scene
+							// of in/out and scene
 	private double crossing_line_in, crossing_line_out; // coord of vertical or
 														// horizontal line to
 	// split the scene
@@ -144,15 +145,17 @@ public class IotCameraVASupervisor extends AbstractActor {
 		this.dilation_size = 7;
 		this.erosion_size = 2;
 		this.blur_size = 5;
-		this.minimum_blob_area = 20;
+		this.minimum_blob_area = 4500;
 		this.minimum_blob_height = 50;
 		this.minimum_blob_width = 50;
+
 		this.in_zone = new Rect(roi_rectangle.x, roi_rectangle.y, 30, roi_rectangle.height);
 		this.out_zone = new Rect(roi_rectangle.x + roi_rectangle.width - 30, roi_rectangle.y, 30, roi_rectangle.height);
 		this.crossing_line_in = 100;
 		this.crossing_line_out = 380;
-		this.vertical = true;//people cross the scene horizonally, so baselines are vertical
-		this.flip_scene = 1; //1 for In left/top, -1 for IN right/bottom
+		this.vertical = true;// people cross the scene horizonally, so baselines
+								// are vertical
+		this.flip_scene = 1; // 1 for In left/top, -1 for IN right/bottom
 		this.hist_bins = 60;
 
 		// stream
@@ -294,7 +297,7 @@ public class IotCameraVASupervisor extends AbstractActor {
 				 * if (this.video_debug) this.showFrame(masked, lbl1);
 				 */
 				// tell tracker
-				 tracker.tell(new UpdateTracking(p.second()), this.getSelf());
+				tracker.tell(new UpdateTracking(p.second()), this.getSelf());
 
 				return p.second();
 			}));
@@ -313,13 +316,21 @@ public class IotCameraVASupervisor extends AbstractActor {
 				for (int i = 0; i < src.size(); i++) {
 					Blob b = new Blob(src.get(i));
 					// filter blobs that are too small
-					if (!(b.getBoundingBox().width < minimum_blob_width
+					evaluateWeight(b, this.minimum_blob_area);
+					if(b.weight()>0 && !(b.getBoundingBox().width < minimum_blob_width
+							|| b.getBoundingBox().height < minimum_blob_height)){
+						blobs.add(b);
+					}
+					
+					/*if (!(b.getBoundingBox().width < minimum_blob_width
 							|| b.getBoundingBox().height < minimum_blob_height)) {
 
 						// set blob weight by area TODO
-						b.setWeight(1);
+						//System.out.println(b.getArea());
+						
+						//b.setWeight(1);
 						blobs.add(b);
-					}
+					}*/
 				}
 
 				return blobs;
@@ -397,7 +408,9 @@ public class IotCameraVASupervisor extends AbstractActor {
 			this.stream = frameSource.via(this.videoAnalysisPartialGraph).viaMat(KillSwitches.single(), Keep.right())
 					.to(Sink.ignore());
 
-		this.tracker = this.getContext().actorOf(TrackerActor.props(crossing_line_in, crossing_line_out, vertical, flip_scene, counter),"Tracker-Actor");
+		this.tracker = this.getContext().actorOf(
+				TrackerActor.props(crossing_line_in, crossing_line_out, vertical, flip_scene, counter),
+				"Tracker-Actor");
 
 		// this.capture.open(cameraId);
 		this.capture.open("res/videoplayback.mp4");
@@ -466,19 +479,19 @@ public class IotCameraVASupervisor extends AbstractActor {
 		return fgmask;
 	}
 
-	// not needed
-	private Mat grabFrame() {
-		Mat frame = new Mat();
-
-		if (this.capture.isOpened()) {
-			try {
-				capture.read(frame);
-			} catch (Exception e) {
-				System.err.println("Exception during the image elaboration: " + e);
-			}
-		}
-
-		return frame;
+	private void evaluateWeight(Blob b, double np) {
+		if (b.getArea() >= np && b.getArea() < 1.4 * np)
+			b.setWeight(1);
+		else if (b.getArea() >= 1.4 * np && b.getArea() < 2.6 * np)
+			b.setWeight(2);
+		else if (b.getArea() >= 2.6 * np && b.getArea() < 3.6 * np)
+			b.setWeight(3);
+		else if (b.getArea() >= 3.6 * np && b.getArea() < 4.8 * np)
+			b.setWeight(4);
+		else if (b.getArea() >= 4.8 * np && b.getArea() < 5.8 * np)
+			b.setWeight(5);
+		else
+			b.setWeight(-1);
 	}
 
 	@Override
@@ -637,6 +650,3 @@ class Tuple3<T1, T2, T3> {
 	}
 
 }
-
-// Creating a graph that does the Video analysis and returns frames of the
-// captured image with rectangles around tracked people
