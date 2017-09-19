@@ -100,7 +100,6 @@ public class IotCameraVASupervisor extends AbstractActor {
 	private int erosion_size;
 	private int dilation_size;
 	private int blur_size;
-	
 
 	// blob weight and filtering
 	private int minimum_blob_width; // boundingbox
@@ -145,7 +144,7 @@ public class IotCameraVASupervisor extends AbstractActor {
 		this.dilation_size = 7;
 		this.erosion_size = 2;
 		this.blur_size = 5;
-		this.minimum_blob_area = 4500;
+		this.minimum_blob_area = 5300;
 		this.minimum_blob_height = 50;
 		this.minimum_blob_width = 50;
 
@@ -176,7 +175,8 @@ public class IotCameraVASupervisor extends AbstractActor {
 				Mat blurred_image = new Mat();
 
 				// transform to grayscale
-				Imgproc.cvtColor(f, processed_frame, Imgproc.COLOR_BGR2GRAY);
+				// Imgproc.cvtColor(f, processed_frame, Imgproc.COLOR_BGR2GRAY);
+				processed_frame = f;
 
 				// highlight region of interest
 				if (usemask)
@@ -185,7 +185,8 @@ public class IotCameraVASupervisor extends AbstractActor {
 				Imgproc.blur(processed_frame, blurred_image, new Size(2 * blur_size + 1, 2 * blur_size + 1));
 				// background subtraction
 				Mat fgmask = subtractBackground(processed_frame);
-
+				if (this.video_debug)
+					this.showFrame(fgmask, lbl1);
 				// morphological operations
 				Mat temp = new Mat();
 				Mat dst = new Mat();
@@ -316,21 +317,21 @@ public class IotCameraVASupervisor extends AbstractActor {
 				for (int i = 0; i < src.size(); i++) {
 					Blob b = new Blob(src.get(i));
 					// filter blobs that are too small
-					evaluateWeight(b, this.minimum_blob_area);
-					if(b.weight()>0 && !(b.getBoundingBox().width < minimum_blob_width
-							|| b.getBoundingBox().height < minimum_blob_height)){
+					evaluateWeight(b, this.minimum_blob_area, 2);
+					if (b.weight() > 0 && !(b.getBoundingBox().width < minimum_blob_width
+							|| b.getBoundingBox().height < minimum_blob_height)) {
 						blobs.add(b);
 					}
-					
-					/*if (!(b.getBoundingBox().width < minimum_blob_width
-							|| b.getBoundingBox().height < minimum_blob_height)) {
 
-						// set blob weight by area TODO
-						//System.out.println(b.getArea());
-						
-						//b.setWeight(1);
-						blobs.add(b);
-					}*/
+					/*
+					 * if (!(b.getBoundingBox().width < minimum_blob_width ||
+					 * b.getBoundingBox().height < minimum_blob_height)) {
+					 * 
+					 * // set blob weight by area TODO
+					 * //System.out.println(b.getArea());
+					 * 
+					 * //b.setWeight(1); blobs.add(b); }
+					 */
 				}
 
 				return blobs;
@@ -475,20 +476,20 @@ public class IotCameraVASupervisor extends AbstractActor {
 		if (frame_history_passed < frame_history_length)
 			frame_history_passed++;
 		Mat fgmask = new Mat();
-		mog2.apply(frame, fgmask, 0.005);
+		mog2.apply(frame, fgmask, 0.01);
 		return fgmask;
 	}
 
-	private void evaluateWeight(Blob b, double np) {
-		if (b.getArea() >= np && b.getArea() < 1.4 * np)
+	private void evaluateWeight(Blob b, double np, double mult) {
+		if (b.getArea() >= np && b.getArea() < mult * 1.4 * np)
 			b.setWeight(1);
-		else if (b.getArea() >= 1.4 * np && b.getArea() < 2.6 * np)
+		else if (b.getArea() >= mult * 1.4 * np && b.getArea() < mult * 2.6 * np)
 			b.setWeight(2);
-		else if (b.getArea() >= 2.6 * np && b.getArea() < 3.6 * np)
+		else if (b.getArea() >= mult * 2.6 * np && b.getArea() < mult * 3.6 * np)
 			b.setWeight(3);
-		else if (b.getArea() >= 3.6 * np && b.getArea() < 4.8 * np)
+		else if (b.getArea() >= mult * 3.6 * np && b.getArea() < mult * 4.8 * np)
 			b.setWeight(4);
-		else if (b.getArea() >= 4.8 * np && b.getArea() < 5.8 * np)
+		else if (b.getArea() >= mult * 4.8 * np && b.getArea() < mult * 5.8 * np)
 			b.setWeight(5);
 		else
 			b.setWeight(-1);
