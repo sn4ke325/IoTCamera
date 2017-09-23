@@ -12,6 +12,7 @@ import org.opencv.imgproc.Imgproc;
 import org.opencv.imgproc.Moments;
 
 public class Blob {
+	private boolean computedCV;
 	private MatOfPoint p;
 	private double area;
 	private Point centroid;
@@ -26,7 +27,6 @@ public class Blob {
 	private int[] hue_vector;
 	private int[] value_vector;
 	private boolean use_hueV;
-	private double low_saturation_perc;
 
 	public Blob(MatOfPoint points) {
 		this.p = points;
@@ -38,6 +38,7 @@ public class Blob {
 		this.centroid = new Point(cx, cy);
 		this.alive = true;
 		this.evaluate = false;
+		this.computedCV = false;
 	}
 
 	public Blob(MatOfPoint points, Rect box) {
@@ -50,28 +51,32 @@ public class Blob {
 	}
 
 	public void addHSVData(List<double[]> l) {
-		// 0 - hue
-		// 1 - saturation
-		// 2 - value
+
 		this.HSV_data = l;
-		double partial = 0;
-		double total = 0;
-		// find the perc of pixels that have saturation under 30
-		for (int i = 0; i < HSV_data.get(1).length; i++) {
-			total += HSV_data.get(1)[i];
-			if (i < 20)
-				partial += HSV_data.get(1)[i];
-
-		}
-		this.low_saturation_perc = (partial / total);
-
-		this.hue_vector = this.findMaxIndexVector(HSV_data.get(0), 3);
-		this.value_vector = this.findMaxIndexVector(HSV_data.get(2), 3);
-		this.use_hueV = this.low_saturation_perc < 0.8;
-
 	}
 
 	public int[] getCV() {
+		if (!this.computedCV) {
+			// 0 - hue
+			// 1 - saturation
+			// 2 - value
+			double low_saturation_perc = 0;
+			double partial = 0;
+			double total = 0;
+			// find the perc of pixels that have saturation under 30
+			for (int i = 0; i < HSV_data.get(1).length; i++) {
+				total += HSV_data.get(1)[i];
+				if (i < 20)
+					partial += HSV_data.get(1)[i];
+
+			}
+			low_saturation_perc = (partial / total);
+
+			this.hue_vector = this.findMaxIndexVector(HSV_data.get(0), 3);
+			this.value_vector = this.findMaxIndexVector(HSV_data.get(2), 3);
+			this.use_hueV = low_saturation_perc < 0.8;
+			this.computedCV = true;
+		}
 		return hue_vector;
 	}
 
@@ -80,11 +85,9 @@ public class Blob {
 	}
 
 	public int[] getVV() {
+		if (!this.computedCV)
+			this.getCV();
 		return value_vector;
-	}
-
-	public double getLowSaturationPerc() {
-		return this.low_saturation_perc;
 	}
 
 	public MatOfPoint getContours() {

@@ -3,11 +3,13 @@ package it.unibo.studio.iot.scc;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.Stack;
 
+import org.opencv.core.Core;
 import org.opencv.core.Point;
 import org.opencv.core.Rect;
 
@@ -83,17 +85,106 @@ public class TrackerActor extends AbstractActor {
 			// try to associate new ones with old ones
 			// removing found ones from the "new" list
 			if (!tracked.isEmpty()) {
+				// Maps the overlapping bounding boxes between old frame and new
+				// frame
+				Map<Integer, List<Integer>> overlaps_tracked = new HashMap<Integer, List<Integer>>();
+				Map<Integer, List<Integer>> overlaps_new = new HashMap<Integer, List<Integer>>();
+
+				tracked.forEach((id, item) -> {
+					// controllo se esistono blob nel nuovo frame con
+					// overlapping bounding box
+					Rect r1 = item.getBlob().getBoundingBox();
+					overlaps_tracked.put(id, new ArrayList<Integer>());
+
+					for (int i = 0; i < r.getBlobs().size(); i++) {
+						if (!overlaps_new.containsKey(i))
+							overlaps_new.put(i, new ArrayList<Integer>());
+
+						Rect r2 = r.getBlobs().get(i).getBoundingBox();
+						Rect ri = Utils.intersect(r1, r2);
+
+						if (ri.area() > 0) { // there is overlapping
+							overlaps_tracked.get(id).add(i);
+							overlaps_new.get(i).add(id);
+						}
+
+					}
+				});
+
+				// now overlaps contains the ids of each new bounding box that
+				// overlaps, for each one
+
+				overlaps_tracked.forEach((id, list) -> {
+					switch (list.size()) {
+					case 0:
+						// check color vector
+						// if present find blob with same color vector that is
+						// also the closest
+						// find a list of blobs with same color vector
+						List<Integer> candidates = new ArrayList<Integer>();
+						for (int i = 0; i < r.getBlobs().size(); i++) {
+							int[] tracked_blobCV = new int[tracked.get(id).getBlob().getCV().length];
+							int[] new_blobCV = new int[tracked.get(id).getBlob().getCV().length];
+							for (int j = 0; j < tracked.get(id).getBlob().getCV().length; j++) {
+								if (tracked.get(id).getBlob().usesHUEVector()) {
+									tracked_blobCV[j] = tracked.get(id).getBlob().getCV()[j] / this.q_hue;
+									new_blobCV[j] = r.getBlobs().get(i).getCV()[j] / this.q_hue;
+								} else {
+									tracked_blobCV[j] = tracked.get(id).getBlob().getVV()[j] / this.q_value;
+									new_blobCV[j] = r.getBlobs().get(i).getVV()[j] / this.q_value;
+								}
+
+							}
+
+							if (Arrays.equals(tracked_blobCV, new_blobCV))
+								candidates.add(i);
+						}
+
+						if (candidates.size() == 1 && Utils.distance(r.getBlobs().get(candidates.get(0)).getCentroid(),
+								tracked.get(id).getBlob().getCentroid()) < this.max_distance_radius) {
+
+							tracked.get(id).updateBlob(r.getBlobs().get(candidates.get(0)));
+							r.getBlobs().remove(candidates.get(0));
+
+						} else if (candidates.size() > 1) {
+							// pick closest
+							int best_candidate = -1;
+							double best_candidate_distance = 100000;
+							for (int i = 0; i < candidates.size(); i++) {
+								double distance = Utils.distance(r.getBlobs().get(candidates.get(i)).getCentroid(),
+										tracked.get(id).getBlob().getCentroid());
+								if (distance < best_candidate_distance) {
+									best_candidate = i;
+									best_candidate_distance = distance;
+								}
+							}
+
+							tracked.get(id).updateBlob(r.getBlobs().get(candidates.get(best_candidate)));
+							r.getBlobs().remove(candidates.get(best_candidate));
+						} else{
+							//nor intersection or matching CV was found
+						}
+
+						break;
+					case 1:
+						// check if not merge case
+						break;
+					default:
+						// split case
+						break;
+					}
+				});
+
 				// there are blobs in the tracked zone already being tracked
 				tracked.forEach((id, item) -> {
-					// controllo se esistono blob nel nuovo frame con centroide
-					// vicino
+					// controllo se esistono blob nel nuovo frame con
+					// overlapping bounding box
+
 					int best_candidate = -1;
 					double best_candidate_distance = 100000;
-
-					// find the closest blob in the previous frame within a
-					// certain radius
-					// from b
+					// find the closest blob
 					for (int i = 0; i < r.getBlobs().size(); i++) {
+
 						double CB = distance(r.getBlobs().get(i).getCentroid(), item.getBlob().getCentroid());
 						if (CB <= max_distance_radius && CB < best_candidate_distance) {
 							best_candidate = i;
@@ -150,6 +241,8 @@ public class TrackerActor extends AbstractActor {
 					}
 
 				});
+
+				// overlaps now contains all the blobs boxes that overlaps
 			}
 
 			// se sono rimaste delle blob nella lista che non sono state
@@ -249,10 +342,6 @@ public class TrackerActor extends AbstractActor {
 				counter = 0;
 		}
 		return counter;
-	}
-
-	private double distance(Point a, Point b) {
-		return Math.sqrt(Math.pow(a.x - b.x, 2) + Math.pow(a.y - b.y, 2));
 	}
 
 }

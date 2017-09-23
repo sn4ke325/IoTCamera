@@ -6,7 +6,6 @@ import java.awt.image.DataBufferByte;
 import java.awt.image.WritableRaster;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 import javax.swing.ImageIcon;
@@ -19,7 +18,6 @@ import org.opencv.core.Mat;
 import org.opencv.core.MatOfFloat;
 import org.opencv.core.MatOfInt;
 import org.opencv.core.MatOfPoint;
-import org.opencv.core.MatOfPoint2f;
 import org.opencv.core.Point;
 import org.opencv.core.Rect;
 import org.opencv.core.Scalar;
@@ -38,9 +36,6 @@ import akka.event.LoggingAdapter;
 import akka.stream.ActorMaterializer;
 import akka.stream.Attributes;
 import akka.stream.FanInShape2;
-import akka.stream.FanInShape3;
-import akka.stream.FanOutShape;
-import akka.stream.FanOutShape2;
 import akka.stream.FlowShape;
 import akka.stream.Graph;
 import akka.stream.Inlet;
@@ -58,8 +53,6 @@ import akka.stream.javadsl.Keep;
 import akka.stream.javadsl.RunnableGraph;
 import akka.stream.javadsl.Sink;
 import akka.stream.javadsl.Source;
-import akka.stream.javadsl.Unzip;
-import akka.stream.javadsl.UnzipWith;
 import akka.stream.javadsl.ZipWith;
 import akka.stream.stage.AbstractInHandler;
 import akka.stream.stage.AbstractOutHandler;
@@ -600,54 +593,6 @@ class MOG2Flow extends GraphStage<FlowShape<Mat, Mat>> {
 			}
 
 		};
-	}
-
-}
-
-class Pair<T1, T2> {
-
-	private T1 A;
-	private T2 B;
-
-	public Pair(T1 f, T2 s) {
-		this.A = f;
-		this.B = s;
-
-	}
-
-	public T1 first() {
-		return A;
-	}
-
-	public T2 second() {
-		return B;
-	}
-
-}
-
-class Tuple3<T1, T2, T3> {
-
-	private T1 A;
-	private T2 B;
-	private T3 C;
-
-	public Tuple3(T1 t1, T2 t2, T3 t3) {
-		this.A = t1;
-		this.B = t2;
-		this.C = t3;
-
-	}
-
-	public T1 first() {
-		return A;
-	}
-
-	public T2 second() {
-		return B;
-	}
-
-	public T3 third() {
-		return C;
 	}
 
 }
