@@ -161,20 +161,39 @@ public class TrackerActor extends AbstractActor {
 
 							tracked.get(id).updateBlob(r.getBlobs().get(candidates.get(best_candidate)));
 							r.getBlobs().remove(candidates.get(best_candidate));
-						} else{
-							//nor intersection or matching CV was found
+						} else {
+							// nor intersection or matching CV was found
+							// blob could go idle
 						}
 
 						break;
 					case 1:
 						// check if not merge case
+						// there is only one intersection
+						// i need to check if the intersected blob has other
+						// intersections with other blobs
+						if (overlaps_new.get(list.get(0)).size() > 1) {
+							// could be a merge case
+							// find other blobs and compare weights
+							// total weight
+						} else {
+							// the blob is the only possible choice
+							tracked.get(id).updateBlob(r.getBlobs().get(list.get(0)));
+							r.getBlobs().remove(list.get(0));
+						}
 						break;
 					default:
 						// split case
+						// there is more than one blob overlapping
+						// per ciascuna blob devo verificare che non sia un caso
+						// di merge con altre
 						break;
 					}
 				});
 
+				// oldcode********************************************************************************
+
+				/*
 				// there are blobs in the tracked zone already being tracked
 				tracked.forEach((id, item) -> {
 					// controllo se esistono blob nel nuovo frame con
@@ -241,9 +260,10 @@ public class TrackerActor extends AbstractActor {
 					}
 
 				});
-
-				// overlaps now contains all the blobs boxes that overlaps
+				// oldcodeend*****************************************************************************
+				*/
 			}
+
 
 			// se sono rimaste delle blob nella lista che non sono state
 			// associate a quelle già presenti, devo decidere cosa farne
@@ -310,17 +330,18 @@ public class TrackerActor extends AbstractActor {
 			}
 
 		}).build();
+
 	}
 
 	private int closestBaseline(Point p) {
 		// returns 0 if IN is closest, else 1
 		if (vertical) {
-			if (distance(p, new Point(crossing_coord_in, p.y)) < distance(p, new Point(crossing_coord_out, p.y)))
+			if (Utils.distance(p, new Point(crossing_coord_in, p.y)) < Utils.distance(p, new Point(crossing_coord_out, p.y)))
 				return 0;
 			return 1;
 
 		} else {
-			if (distance(p, new Point(crossing_coord_in, p.x)) < distance(p, new Point(crossing_coord_out, p.x)))
+			if (Utils.distance(p, new Point(crossing_coord_in, p.x)) < Utils.distance(p, new Point(crossing_coord_out, p.x)))
 				return 0;
 			return 1;
 
