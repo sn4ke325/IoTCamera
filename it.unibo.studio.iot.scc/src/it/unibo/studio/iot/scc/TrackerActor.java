@@ -3,13 +3,11 @@ package it.unibo.studio.iot.scc;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.Stack;
+import java.util.concurrent.TimeUnit;
 
-import org.opencv.core.Core;
 import org.opencv.core.Point;
 import org.opencv.core.Rect;
 
@@ -20,21 +18,18 @@ import akka.event.Logging;
 import akka.event.LoggingAdapter;
 import it.unibo.studio.iot.scc.messages.Count;
 import it.unibo.studio.iot.scc.messages.UpdateTracking;
+import scala.concurrent.duration.Duration;
 
 public class TrackerActor extends AbstractActor {
 
 	private final LoggingAdapter log = Logging.getLogger(getContext().getSystem(), this);
 	private ActorRef counterActor;
-	private Rect in_zone, out_zone;
 	private double crossing_coord_in;// crossed[0]
 	private double crossing_coord_out;// crossed[1]
 	private boolean vertical;
 	private int flipped;
 	private int counter;
 	private double max_distance_radius;
-
-	private Map<Integer, Boolean> updated_blobs;// keeps track of the blobs that
-												// got an update due to tracking
 	private Map<Integer, List<Integer>> merged_blobs; // maps smaller blobs that
 														// got merged into
 														// bigger ones to track
@@ -55,7 +50,6 @@ public class TrackerActor extends AbstractActor {
 
 	public void preStart() {
 		this.counter = 0;
-		this.updated_blobs = new HashMap<Integer, Boolean>();
 		this.merged_blobs = new HashMap<Integer, List<Integer>>();
 
 		this.tracked = new HashMap<Integer, TrackedItem>();
@@ -66,6 +60,61 @@ public class TrackerActor extends AbstractActor {
 		// these values should be decided by the user depending on the camera
 		this.q_hue = 5;
 		this.q_value = 16;
+
+		this.getContext().getSystem().scheduler().schedule(Duration.Zero(), Duration.create(100, TimeUnit.MILLISECONDS),
+				new Runnable() {
+
+					@Override
+					public void run() {
+						// now it's time to check if alive blobs have crossed
+						// another
+						// baseline and do the counting
+						Stack<Integer> deathrow = new Stack<Integer>();
+						tracked.forEach((id, item) -> {
+							if (!inTrackingArea(item.lastPos())) {
+								deathrow.push(id);
+								if (item.baseline() != closestBaseline(item.lastPos())) {
+									// blob is crossing the second baseline =>
+									// count and
+									// delete
+
+									// call closest baseline
+									// if 0 the blob is entering the building
+									// else is leaving
+									if (item.baseline() == 1) {
+										// count in
+										log.info("Blob with ID " + Integer.toString(item.getID())
+												+ " has left the scene. Counting "
+												+ Integer.toString(item.getBlob().weight() * flipped));
+										counterActor.tell(new Count(item.getBlob().weight() * flipped), getSelf());
+
+									} else {
+										// count out
+										log.info("Blob with ID " + Integer.toString(item.getID())
+												+ " has left the scene. Counting "
+												+ Integer.toString(-item.getBlob().weight() * flipped));
+										counterActor.tell(new Count(-item.getBlob().weight() * flipped), getSelf());
+									}
+
+								}
+
+							} else {// controllo se nella zona di tracking vi
+									// sono blob
+									// freezate
+								if (item.isIdle())
+									deathrow.push(id);
+							}
+						});
+						// System.out.println("Clear Blobs");
+						// clear dead blobs
+						while (!deathrow.isEmpty()) {
+							int id = deathrow.pop();
+							tracked.remove(id);
+						}
+
+					}
+
+				}, this.getContext().getSystem().dispatcher());
 	}
 
 	public static Props props(double i, double o, boolean v, int f, ActorRef a) {
@@ -80,6 +129,8 @@ public class TrackerActor extends AbstractActor {
 			 * updated_blobs.forEach((id, updated) -> {
 			 * updated_blobs.replace(id, false); });
 			 */
+			// System.out.println(tracked.size());
+			// System.out.println(r.getBlobs().size());
 
 			// if some blobs are already being tracked
 			// try to associate new ones with old ones
@@ -89,6 +140,7 @@ public class TrackerActor extends AbstractActor {
 				// frame
 				Map<Integer, List<Integer>> overlaps_tracked = new HashMap<Integer, List<Integer>>();
 				Map<Integer, List<Integer>> overlaps_new = new HashMap<Integer, List<Integer>>();
+				// System.out.println(tracked.size());
 
 				tracked.forEach((id, item) -> {
 					// controllo se esistono blob nel nuovo frame con
@@ -113,10 +165,11 @@ public class TrackerActor extends AbstractActor {
 
 				// now overlaps contains the ids of each new bounding box that
 				// overlaps, for each one
-
+				//System.out.println(r.getBlobs().size());
 				overlaps_tracked.forEach((id, list) -> {
 					switch (list.size()) {
-					case 0:
+					case 0: {
+						// System.out.println("Case 0");
 						// check color vector
 						// if present find blob with same color vector that is
 						// also the closest
@@ -167,109 +220,110 @@ public class TrackerActor extends AbstractActor {
 						}
 
 						break;
-					case 1:
+					}
+					case 1: {
+						// System.out.println("Case 1");
 						// check if not merge case
 						// there is only one intersection
 						// i need to check if the intersected blob has other
 						// intersections with other blobs
-						if (overlaps_new.get(list.get(0)).size() > 1) {
-							// could be a merge case
-							// find other blobs and compare weights
-							// total weight
-						} else {
-							// the blob is the only possible choice
-							tracked.get(id).updateBlob(r.getBlobs().get(list.get(0)));
-							r.getBlobs().remove(list.get(0));
-						}
+						// System.out.println(list.get(0));
+						tracked.get(id).updateBlob(r.getBlobs().get(list.get(0)));
+						r.getBlobs().remove((int) list.get(0));
+						/*
+						 * if (overlaps_new.get(list.get(0)).size() > 1 &&
+						 * r.getBlobs().get(list.get(0)).weight() >
+						 * tracked.get(id).getBlob().weight()) { //
+						 * System.out.println("Case 1 - more overlaps " + //
+						 * list.size() + " "+ //
+						 * overlaps_new.get(list.get(0)).size()); // could be a
+						 * merge case // find other blobs and compare weights //
+						 * total weight
+						 * 
+						 * } else { // the blob is the only possible choice
+						 * tracked.get(id).updateBlob(r.getBlobs().get(list.get(
+						 * 0))); r.getBlobs().remove(list.get(0)); }
+						 */
 						break;
-					default:
+					}
+					default: {
+						// System.out.println("Case default");
 						// split case
 						// there is more than one blob overlapping
 						// per ciascuna blob devo verificare che non sia un caso
 						// di merge con altre
 						break;
 					}
+					}
 				});
 
 				// oldcode********************************************************************************
 
 				/*
-				// there are blobs in the tracked zone already being tracked
-				tracked.forEach((id, item) -> {
-					// controllo se esistono blob nel nuovo frame con
-					// overlapping bounding box
-
-					int best_candidate = -1;
-					double best_candidate_distance = 100000;
-					// find the closest blob
-					for (int i = 0; i < r.getBlobs().size(); i++) {
-
-						double CB = distance(r.getBlobs().get(i).getCentroid(), item.getBlob().getCentroid());
-						if (CB <= max_distance_radius && CB < best_candidate_distance) {
-							best_candidate = i;
-							best_candidate_distance = CB;
-						}
-
-					}
-
-					// if no candidate was found check using color vectors
-					if (best_candidate == -1) {
-						// make a list of possible candidates (for when people
-						// wear the same colors)
-						List<Integer> candidates = new ArrayList<Integer>();
-						for (int i = 0; i < r.getBlobs().size(); i++) {
-							int[] alive_blobCV = new int[item.getBlob().getCV().length];
-							int[] new_blobCV = new int[item.getBlob().getCV().length];
-							for (int j = 0; j < item.getBlob().getCV().length; j++) {
-								if (item.getBlob().usesHUEVector()) {
-									alive_blobCV[j] = item.getBlob().getCV()[j] / this.q_hue;
-									new_blobCV[j] = r.getBlobs().get(i).getCV()[j] / this.q_hue;
-								} else {
-									alive_blobCV[j] = item.getBlob().getVV()[j] / this.q_value;
-									new_blobCV[j] = r.getBlobs().get(i).getVV()[j] / this.q_value;
-								}
-
-							}
-
-							if (Arrays.equals(alive_blobCV, new_blobCV))
-								candidates.add(i);
-						}
-
-						// if something is found
-						if (candidates.size() > 0) {
-							// find the closest one
-							for (int i = 0; i < r.getBlobs().size(); i++) {
-								double CB = distance(r.getBlobs().get(candidates.get(i)).getCentroid(),
-										item.getBlob().getCentroid());
-								if (CB < best_candidate_distance) {
-									best_candidate = i;
-									best_candidate_distance = CB;
-								}
-
-							}
-						}
-
-					}
-					// either by centroid or by color vector something has been
-					// found
-					// time to update the tracking
-
-					if (best_candidate != -1) {
-						Blob candidate = r.getBlobs().remove(best_candidate);
-						item.updateBlob(candidate);
-					}
-
-				});
-				// oldcodeend*****************************************************************************
-				*/
+				 * // there are blobs in the tracked zone already being tracked
+				 * tracked.forEach((id, item) -> { // controllo se esistono blob
+				 * nel nuovo frame con // overlapping bounding box
+				 * 
+				 * int best_candidate = -1; double best_candidate_distance =
+				 * 100000; // find the closest blob for (int i = 0; i <
+				 * r.getBlobs().size(); i++) {
+				 * 
+				 * double CB = distance(r.getBlobs().get(i).getCentroid(),
+				 * item.getBlob().getCentroid()); if (CB <= max_distance_radius
+				 * && CB < best_candidate_distance) { best_candidate = i;
+				 * best_candidate_distance = CB; }
+				 * 
+				 * }
+				 * 
+				 * // if no candidate was found check using color vectors if
+				 * (best_candidate == -1) { // make a list of possible
+				 * candidates (for when people // wear the same colors)
+				 * List<Integer> candidates = new ArrayList<Integer>(); for (int
+				 * i = 0; i < r.getBlobs().size(); i++) { int[] alive_blobCV =
+				 * new int[item.getBlob().getCV().length]; int[] new_blobCV =
+				 * new int[item.getBlob().getCV().length]; for (int j = 0; j <
+				 * item.getBlob().getCV().length; j++) { if
+				 * (item.getBlob().usesHUEVector()) { alive_blobCV[j] =
+				 * item.getBlob().getCV()[j] / this.q_hue; new_blobCV[j] =
+				 * r.getBlobs().get(i).getCV()[j] / this.q_hue; } else {
+				 * alive_blobCV[j] = item.getBlob().getVV()[j] / this.q_value;
+				 * new_blobCV[j] = r.getBlobs().get(i).getVV()[j] /
+				 * this.q_value; }
+				 * 
+				 * }
+				 * 
+				 * if (Arrays.equals(alive_blobCV, new_blobCV))
+				 * candidates.add(i); }
+				 * 
+				 * // if something is found if (candidates.size() > 0) { // find
+				 * the closest one for (int i = 0; i < r.getBlobs().size(); i++)
+				 * { double CB =
+				 * distance(r.getBlobs().get(candidates.get(i)).getCentroid(),
+				 * item.getBlob().getCentroid()); if (CB <
+				 * best_candidate_distance) { best_candidate = i;
+				 * best_candidate_distance = CB; }
+				 * 
+				 * } }
+				 * 
+				 * } // either by centroid or by color vector something has been
+				 * // found // time to update the tracking
+				 * 
+				 * if (best_candidate != -1) { Blob candidate =
+				 * r.getBlobs().remove(best_candidate);
+				 * item.updateBlob(candidate); }
+				 * 
+				 * }); //
+				 * oldcodeend***************************************************
+				 * **************************
+				 */
 			}
-
+			//System.out.println(r.getBlobs().size());
 
 			// se sono rimaste delle blob nella lista che non sono state
 			// associate a quelle già presenti, devo decidere cosa farne
 			// se sono fuori dall'area di tracking le ignoro, se sono
 			// all'interno inizio a tracciarle come nuove blobs
-
+			// System.out.println(r.getBlobs().size());
 			for (Blob b : r.getBlobs()) {
 				// if the blob is in the tracking area add it to the alive
 				// list
@@ -288,47 +342,6 @@ public class TrackerActor extends AbstractActor {
 
 			}
 
-			// now it's time to check if alive blobs have crossed another
-			// baseline and do the counting
-			Stack<Integer> deathrow = new Stack<Integer>();
-			tracked.forEach((id, item) -> {
-				if (!inTrackingArea(item.lastPos())) {
-					deathrow.push(id);
-					if (item.baseline() != closestBaseline(item.lastPos())) {
-						// blob is crossing the second baseline => count and
-						// delete
-
-						// call closest baseline
-						// if 0 the blob is entering the building
-						// else is leaving
-						if (item.baseline() == 1) {
-							// count in
-							log.info("Blob with ID " + Integer.toString(item.getID()) + " has left the scene. Counting "
-									+ Integer.toString(item.getBlob().weight() * flipped));
-							this.counterActor.tell(new Count(item.getBlob().weight() * flipped), this.getSelf());
-
-						} else {
-							// count out
-							log.info("Blob with ID " + Integer.toString(item.getID()) + " has left the scene. Counting "
-									+ Integer.toString(-item.getBlob().weight() * flipped));
-							this.counterActor.tell(new Count(-item.getBlob().weight() * flipped), this.getSelf());
-						}
-
-					}
-
-				} else {// controllo se nella zona di tracking vi sono blob
-						// freezate
-					if (item.isIdle())
-						deathrow.push(id);
-				}
-			});
-
-			// clear dead blobs
-			while (!deathrow.isEmpty()) {
-				int id = deathrow.pop();
-				tracked.remove(id);
-			}
-
 		}).build();
 
 	}
@@ -336,12 +349,14 @@ public class TrackerActor extends AbstractActor {
 	private int closestBaseline(Point p) {
 		// returns 0 if IN is closest, else 1
 		if (vertical) {
-			if (Utils.distance(p, new Point(crossing_coord_in, p.y)) < Utils.distance(p, new Point(crossing_coord_out, p.y)))
+			if (Utils.distance(p, new Point(crossing_coord_in, p.y)) < Utils.distance(p,
+					new Point(crossing_coord_out, p.y)))
 				return 0;
 			return 1;
 
 		} else {
-			if (Utils.distance(p, new Point(crossing_coord_in, p.x)) < Utils.distance(p, new Point(crossing_coord_out, p.x)))
+			if (Utils.distance(p, new Point(crossing_coord_in, p.x)) < Utils.distance(p,
+					new Point(crossing_coord_out, p.x)))
 				return 0;
 			return 1;
 

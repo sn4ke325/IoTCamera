@@ -50,7 +50,7 @@ public class TrackedItem {
 
 	public boolean isIdle() {
 		idle_since++;
-		return !(idle_since < 10);
+		return !(idle_since < 5);
 
 	}
 

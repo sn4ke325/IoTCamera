@@ -187,8 +187,6 @@ public class IotCameraVASupervisor extends AbstractActor {
 				Imgproc.blur(temp, blurred_image, new Size(2 * blur_size + 1, 2 * blur_size + 1));
 				Imgproc.threshold(blurred_image, temp, threshold_value, 255, Imgproc.THRESH_BINARY);
 
-				// ok until here
-
 				// dilate with large element, erode with small one
 				Mat elementD = Imgproc.getStructuringElement(Imgproc.MORPH_RECT,
 						new Size(2 * dilation_size + 1, 2 * dilation_size + 1));
@@ -200,19 +198,14 @@ public class IotCameraVASupervisor extends AbstractActor {
 				Imgproc.dilate(dst, temp, elementD);
 				Imgproc.erode(temp, dst, elementE);
 				Imgproc.dilate(dst, temp, elementD);
-				if (this.video_debug)
-					this.showFrame(temp, lbl1);
 
 				Imgproc.GaussianBlur(temp, blurred_image, new Size(2 * blur_size + 1, 2 * blur_size + 1),
 						2 * blur_size);
 
 				Imgproc.threshold(blurred_image, temp, 50, 255, Imgproc.THRESH_BINARY);
 				Imgproc.erode(temp, dst, elementE);
-
-				// mask the original image with fgmask
-				// f.copyTo(processed_frame, dst);
-
-				// returns processed fgmask for contours finding
+				if (this.video_debug)
+					this.showFrame(dst, lbl1);
 
 				return dst;
 			}));
@@ -312,21 +305,12 @@ public class IotCameraVASupervisor extends AbstractActor {
 				for (int i = 0; i < src.size(); i++) {
 					Blob b = new Blob(src.get(i));
 					// filter blobs that are too small
-					evaluateWeight(b, this.minimum_blob_area, 2);
+					evaluateWeight(b, this.minimum_blob_area, 2.5);
 					if (b.weight() > 0 && !(b.getBoundingBox().width < minimum_blob_width
 							|| b.getBoundingBox().height < minimum_blob_height)) {
 						blobs.add(b);
 					}
 
-					/*
-					 * if (!(b.getBoundingBox().width < minimum_blob_width ||
-					 * b.getBoundingBox().height < minimum_blob_height)) {
-					 * 
-					 * // set blob weight by area TODO
-					 * //System.out.println(b.getArea());
-					 * 
-					 * //b.setWeight(1); blobs.add(b); }
-					 */
 				}
 
 				return blobs;
@@ -334,7 +318,7 @@ public class IotCameraVASupervisor extends AbstractActor {
 
 			final FanInShape2<List<Blob>, Mat, Mat> zip_draw = builder
 					.add(ZipWith.create((List<Blob> left, Mat right) -> {
-						System.out.println(left.size());
+						// System.out.println(left.size());
 						for (Blob b : left) {
 
 							Rect r = b.getBoundingBox();
@@ -347,16 +331,7 @@ public class IotCameraVASupervisor extends AbstractActor {
 								new Point(roi_rectangle.x + roi_rectangle.width,
 										roi_rectangle.y + roi_rectangle.height),
 								new Scalar(255, 255, 0));
-						// draw areas
-						/*
-						 * Imgproc.rectangle(right, new Point(in_zone.x,
-						 * in_zone.y), new Point(in_zone.x + in_zone.width,
-						 * in_zone.y + in_zone.height), new Scalar(0, 255, 0));
-						 * Imgproc.rectangle(right, new Point(out_zone.x,
-						 * out_zone.y), new Point(out_zone.x + out_zone.width,
-						 * out_zone.y + out_zone.height), new Scalar(0, 0,
-						 * 255));
-						 */
+
 						// draw crossing line
 						if (vertical) {
 							Imgproc.line(right, new Point(crossing_line_in, 0),
