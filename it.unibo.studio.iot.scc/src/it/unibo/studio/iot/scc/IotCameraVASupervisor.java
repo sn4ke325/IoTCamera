@@ -128,7 +128,7 @@ public class IotCameraVASupervisor extends AbstractActor {
 		this.cameraActive = false;
 		this.capture = new VideoCapture();
 		// default parameters
-		this.usemask = true;
+		this.usemask = false;
 		this.roi_rectangle = new Rect(0, 100, 480, 180);
 		this.frame_history_length = 60;
 		this.mog2 = Video.createBackgroundSubtractorMOG2();
@@ -178,8 +178,7 @@ public class IotCameraVASupervisor extends AbstractActor {
 				Imgproc.blur(processed_frame, blurred_image, new Size(2 * blur_size + 1, 2 * blur_size + 1));
 				// background subtraction
 				Mat fgmask = subtractBackground(processed_frame);
-				if (this.video_debug)
-					this.showFrame(fgmask, lbl1);
+
 				// morphological operations
 				Mat temp = new Mat();
 				Mat dst = new Mat();
@@ -196,10 +195,13 @@ public class IotCameraVASupervisor extends AbstractActor {
 				Mat elementE = Imgproc.getStructuringElement(Imgproc.MORPH_RECT,
 						new Size(2 * erosion_size + 1, 2 * erosion_size + 1));
 
-				Imgproc.erode(temp, dst, elementE);
+				// Imgproc.erode(temp, dst, elementE);
+				dst = temp;
 				Imgproc.dilate(dst, temp, elementD);
 				Imgproc.erode(temp, dst, elementE);
 				Imgproc.dilate(dst, temp, elementD);
+				if (this.video_debug)
+					this.showFrame(temp, lbl1);
 
 				Imgproc.GaussianBlur(temp, blurred_image, new Size(2 * blur_size + 1, 2 * blur_size + 1),
 						2 * blur_size);
@@ -332,6 +334,7 @@ public class IotCameraVASupervisor extends AbstractActor {
 
 			final FanInShape2<List<Blob>, Mat, Mat> zip_draw = builder
 					.add(ZipWith.create((List<Blob> left, Mat right) -> {
+						System.out.println(left.size());
 						for (Blob b : left) {
 
 							Rect r = b.getBoundingBox();
